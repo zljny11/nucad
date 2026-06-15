@@ -1,0 +1,89 @@
+@font-face {
+  font-family: "NewIconfont";
+  /* Project id 3163163 */
+  src: url('./iconfont.woff2?t=1645429124148') format('woff2'),
+    url('./iconfont.woff?t=1645429124148') format('woff'),
+    url('./iconfont.ttf?t=1645429124148') format('truetype'),
+    url('iconfont.ttf2?t=1676439459769') format('truetype');
+}
+
+.buttonContainer:hover {
+  color: rgb(111, 165, 235);
+  cursor: pointer;
+}
+
+.NewIconfont {
+  font-family: "NewIconfont" !important;
+  font-size: 30px;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.NewIconfont:hover {
+  color: rgb(111, 165, 235);
+  cursor: pointer;
+}
+
+/* /* 菜单栏图标选中 */
+.chosenIconfont {
+  font-family: "NewIconfont" !important;
+  font-size: 30px;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: rgb(111, 165, 235);
+  background: rgb(42, 54, 59, 0.7);
+  border-radius: 5px;
+}
+
+.NewIconfont, .chosenIconfont {
+  height: 32px;
+}
+
+.icon-sousuo:before {
+  content: "\e8b9";
+}
+
+.icon-fanhui:before {
+  content: "\e8a4";
+}
+
+.icon-tongbu:before {
+  content: "\e85f";
+}
+
+.icon-zidongliangdu:before {
+  content: "\e8da";
+}
+
+.icon-icons-:before {
+  content: "\e616";
+}
+
+.icon-fangda:before {
+  content: "\ec13";
+}
+
+.icon-xuanzhuan:before {
+  content: "\e6ef";
+}
+
+.icon-brightj2:before {
+  content: "\e685";
+}
+
+.icon-tanzhen:before {
+  content: "\e6b0";
+}
+
+.icon-tuozhuai:before {
+  content: "\e6ab";
+}
+
+.icon-wenjiantongbu:before {
+  content: "\e6ad";
+}
+
+.icon-wenjianxiazai:before {
+  content: "\e613";
+}

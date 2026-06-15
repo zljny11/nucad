@@ -1,0 +1,68 @@
+.Report1 {
+  .reportText {
+    margin-top: 10px;
+    font-size: 46px;
+  }
+
+  .MedicalHistory,
+  .ClinicalDiagnosis {
+    margin-top: 30px;
+    font-size: 20px;
+
+    .title,
+    .title2 {
+      text-align: left;
+      font-weight: bold;
+    }
+  }
+
+  .MedicalHistory {
+    .text {
+      margin-top: 10px;
+      .ql-editor {
+        padding: 0;
+
+        p {
+          text-indent: 2em;
+          font-size: 18px;
+        }
+      }
+    }
+  }
+
+  .ClinicalDiagnosis {
+    .content {
+      width: 73%;
+      margin: 20px auto;
+
+      .row {
+        display: flex;
+        line-height: 2.5rem;
+        text-align: left;
+
+        div {
+          width: 25%;
+        }
+        div:nth-child(2) {
+          width: 27%;
+        }
+        div:last-child {
+          width: 23%;
+        }
+
+        .infoName {
+          min-width: 210px;
+        }
+      }
+    }
+
+    .imgContainer {
+      width: 65%;
+      margin: 0 auto;
+
+      img {
+        width: 50%;
+      }
+    }
+  }
+}

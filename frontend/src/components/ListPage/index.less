@@ -1,0 +1,167 @@
+.ListPage {
+  height: calc(100vh);
+  background-color: #000;
+  color: #fff;
+  position: relative;
+
+  .ListPageHeader {
+    height: 100px;
+
+    .logo {
+      position: absolute;
+      height: 72px;
+      left: 15px;
+      top: 15px;
+    }
+
+    .searchBar {
+      height: 1rem;
+      margin-top: 40px;
+      margin-left: 400px;
+      text-align: left;
+
+      form {
+        display: inline;
+        position: relative;
+      }
+
+      input {
+        width: 360px;
+        height: 31px;
+        padding-left: 13px;
+        border: none;
+        outline: none;
+        border-radius: 40px;
+        background: #c3c3c3;
+        transition: 0.3s linear;
+      }
+      input:focus {
+        width: 400px;
+      }
+      input:hover {
+        background-color: #ddd;
+      }
+
+      .searchBtn {
+        position: absolute;
+        top: -5px;
+        right: 5px;
+      }
+    }
+
+    .backButton {
+      position: absolute;
+      height: 72px;
+      right: 150px;
+      top: 40px;
+    }
+  }
+
+  .bodyBox {
+    width: 1300px;
+    margin: 0 auto;
+    margin-top: 30px;
+    text-align: left;
+    font-size: 16px;
+    font-family: "Franklin Gothic Medium", "Arial Narrow", Arial, sans-serif;
+
+    .listRow {
+      height: 60px;
+      display: flex;
+      justify-content: space-evenly;
+      line-height: 60px;
+      border-radius: 5px;
+      text-align: center;
+
+      .desc {
+        width: 250px;
+      }
+      .no,
+      .modifineTime {
+        width: 200px;
+      }
+      .name {
+        width: 150px;
+      }
+      .sex,
+      .mode {
+        width: 80px;
+      }
+      .birthday,
+      .processTime {
+        width: 100px;
+      }
+      .operation {
+        width: 120px;
+        display: flex;
+        justify-content: space-around;
+      }
+
+      .DropdownContainer {
+        position: relative;
+        .dropdown {
+          height: 1.2rem;
+          display: none;
+          position: absolute;
+          top: 2.5rem;
+          left: 30px;
+          font-size: 14px;
+          line-height: 1.2rem;
+          background-color: #fff;
+          color: #202c4a;
+        }
+      }
+      .DropdownContainer:hover {
+        .dropdown {
+          display: block;
+        }
+      }
+
+      .listBtn {
+        width: 55px;
+        height: 35px;
+        margin-top: 11px;
+        background: #202c4a;
+        color: #fff;
+        font-size: 14.5px;
+        border: none;
+        border-radius: 15px;
+        cursor: pointer;
+      }
+    }
+    .listRow1 {
+      background-color: #131e38;
+    }
+  }
+
+  .pagination {
+    bottom: 100px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    position: absolute;
+
+    .disabledButton,
+    .pageButton {
+      width: 60px;
+      margin: 5px;
+      padding: 2px;
+      border: none;
+      border-radius: 5px;
+      color: aliceblue;
+    }
+    .pageButton {
+      background-color: #213055;
+      cursor: pointer;
+    }
+    .disabledButton {
+      background-color: #666;
+    }
+    .pageInfo {
+      font-family: '宋体';
+      font-size: 18px;
+      font-weight: 700;
+      margin: 10px;
+    }
+  }
+}

@@ -1,0 +1,46 @@
+import axios from "axios";
+
+interface SegmentationLoadResponse {
+  success: boolean;
+  exists: boolean;
+  source: "doctor" | "algorithm" | "none" | "error";
+  path?: string;
+  dimensions?: number[];
+  positiveVoxelCount?: number;
+  isEmptyMask?: boolean;
+  scalarDataBase64?: string;
+  message?: string;
+}
+
+interface SegmentationSavePayload {
+  outputPath: string;
+  dimensions: number[];
+  spacing: number[];
+  origin: number[];
+  direction: number[];
+  scalarDataBase64: string;
+}
+
+const getSegmentationUrl = (seriesId: string) =>
+  `http://localhost:4001/study/${encodeURIComponent(seriesId)}/segmentation`;
+
+const loadSegmentation = async (
+  seriesId: string,
+  outputPath: string
+): Promise<SegmentationLoadResponse> => {
+  const response = await axios.get(getSegmentationUrl(seriesId), {
+    params: { outputPath },
+  });
+  return response.data;
+};
+
+const saveSegmentation = async (
+  seriesId: string,
+  payload: SegmentationSavePayload
+) => {
+  const response = await axios.post(getSegmentationUrl(seriesId), payload);
+  return response.data;
+};
+
+export type { SegmentationLoadResponse, SegmentationSavePayload };
+export { loadSegmentation, saveSegmentation };

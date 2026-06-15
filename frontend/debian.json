@@ -1,0 +1,10 @@
+{
+  "dest": "./out",
+  "icon": "./src/Newincon/icons/Icon.png",
+  "categories": [
+    "Development"
+  ],
+  "lintianOverrides": [
+    "changelog-file-missing-in-native-package"
+  ]
+}

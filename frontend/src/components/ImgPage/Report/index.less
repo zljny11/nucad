@@ -1,0 +1,159 @@
+@reportFontColor: #0e5d94;
+@titleBgc: #8ba9d2;
+
+.Report {
+  width: 100%;
+  min-height: 100vh;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 999;
+  background-color: #eee;
+
+  .reportViewport {
+    width: 100%;
+
+    .reportHead {
+      width: 100%;
+      height: 100px;
+      background-color: #fff;
+      position: fixed;
+      top: 0;
+      z-index: 1000;
+
+      .logo {
+        height: 72px;
+        position: absolute;
+        left: 15px;
+        top: 15px;
+      }
+
+      .reportTitle {
+        padding-top: 20px;
+        font-size: 35px;
+        font-weight: bold;
+        color: @reportFontColor;
+      }
+
+      .reportGoBackBtn,
+      .reportDownloadBtn {
+        position: fixed;
+        right: 10px;
+        top: 30px;
+        font-size: 25px;
+        font-weight: bold;
+        color: @reportFontColor;
+      }
+
+      .reportDownloadBtn {
+        right: 120px;
+      }
+    }
+
+    .report {
+      box-sizing: border-box;
+      width: 1184.56px;
+      margin: 0 auto;
+      margin-top: 100px;
+      color: #000;
+      font-size: 18px;
+
+      .ReportOne {
+        box-sizing: border-box;
+        width: 100%;
+        height: 1683.78px;
+        margin-bottom: 40px;
+        padding: 0 60px;
+        background-color: #fff;
+        position: relative;
+
+        .Header {
+          padding: 40px 0;
+          border-bottom: 1px solid #000;
+
+          .flexContainer {
+            width: 90%;
+            margin: 0 auto;
+            display: flex;
+
+            .imgContainer {
+              width: 120px;
+              height: 120px;
+              margin: 0 40px;
+
+              img {
+                width: 100%;
+              }
+            }
+
+            .textContainer {
+              div:first-child {
+                font-size: 48px;
+                font-family: STXingkai;
+              }
+
+              div:last-child {
+                font-size: 32px;
+              }
+            }
+          }
+        }
+
+        .patientInfo {
+          .row {
+            display: flex;
+            height: 60px;
+            border-bottom: 1px solid #000;
+
+            div,
+            input,
+            textarea {
+              text-align: center;
+            }
+
+            div,
+            input {
+              width: 20%;
+              height: 32px;
+              margin-top: 25px;
+            }
+
+            input:nth-child(2),
+            input:last-child {
+              width: 30%;
+            }
+
+            div {
+              max-width: 80px;
+              font-weight: bold;
+            }
+
+            textarea {
+              width: 30%;
+            }
+
+            input,
+            textarea {
+              margin-top: 23px;
+              font-size: 16px;
+            }
+          }
+        }
+
+        .Footer {
+          box-sizing: border-box;
+          width: 1064.56px;
+          border-top: 1px solid #000;
+          font-size: 14px;
+          text-align: center;
+          position: absolute;
+          bottom: 40px;
+        }
+      }
+    }
+
+    .noMargin .ReportOne {
+      margin-bottom: 0;
+    }
+  }
+}

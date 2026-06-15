@@ -1,0 +1,411 @@
+.ImgPage {
+  background-color: black;
+  color: #fff;
+  overflow: hidden;
+
+  .ImgShowHeader {
+    height: calc(10vh);
+    background-color: black;
+    padding: 20px 15px 0 15px;
+    display: flex;
+    justify-content: space-between;
+
+    .logo {
+      height: 70px;
+    }
+
+    .ImgShowMenu {
+      width: calc(62vw);
+      display: flex;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      align-content: flex-start;
+
+      .buttonContainer {
+        width: 72px;
+        float: left;
+        text-align: center;
+        margin: 4px 6px;
+        font-size: 13px;
+        cursor: pointer;
+
+        .crosshairsIcon {
+          height: 32px;
+        }
+      }
+
+      .disabledAction {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+    }
+
+    .name {
+      color: #7f889a;
+      font: 1em sans-serif;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: right;
+
+      .maskStatus {
+        margin-top: 8px;
+        font-size: 12px;
+        font-weight: normal;
+        line-height: 1.4;
+        color: #c7d1e0;
+      }
+    }
+  }
+
+  .imgShowBody {
+    width: 100%;
+    height: calc(90vh);
+    background-color: #141313;
+    display: flex;
+
+    .ImgShow {
+      width: 75%;
+      height: 100%;
+
+      .maskBanner {
+        width: calc(100% - 10px);
+        margin: 10px 10px 0 0;
+        padding: 8px 12px;
+        box-sizing: border-box;
+        border: 1px solid #2a90b8;
+        border-radius: 8px;
+        color: #d8edf7;
+        background-color: rgba(9, 51, 69, 0.75);
+        font-size: 13px;
+      }
+
+      .viewportGrid {
+        width: 100%;
+        height: calc(100% - 54px);
+        display: grid;
+        grid-template-rows: [row1-start] 50% [row2-start] 50% [end];
+        grid-template-columns: [col1-start] 50% [col1-start] 50% [end];
+
+        .element {
+          margin-top: 10px;
+          margin-right: 10px;
+          border: 1px solid #0069a7;
+          border-radius: 8px;
+          transition: 0.2s;
+          overflow: hidden;
+          position: relative;
+
+          .viewport {
+            width: 100%;
+            height: 100%;
+
+            .img_viewport_content,
+            .img_viewport_pInfo,
+            .MPR_Switch {
+              text-align: left;
+              position: absolute;
+              z-index: 999;
+            }
+            .img_viewport_content,
+            .img_viewport_pInfo {
+              top: 10px;
+            }
+            .img_viewport_content {
+              left: 20px;
+            }
+            .img_viewport_pInfo {
+              right: 20px;
+              text-align: right;
+            }
+
+            .MPR_Switch {
+              bottom: 20px;
+              right: 20px;
+
+              div {
+                height: 30px;
+                cursor: pointer;
+                line-height: 30px;
+                text-align: center;
+                color: #135d79;
+              }
+              div:hover {
+                color: #1a85ac;
+              }
+              .selected {
+                color: #049af1;
+              }
+              .selected:hover {
+                color: #049af1;
+              }
+            }
+          }
+        }
+
+        .element:hover {
+          border: 1px solid #1f9dcc;
+        }
+
+        .element1_1 {
+          grid-row-start: 1;
+          grid-column-start: 1;
+        }
+        .element1_2 {
+          grid-row-start: 1;
+          grid-column-start: 2;
+        }
+        .element2_1 {
+          grid-row-start: 2;
+          grid-column-start: 1;
+        }
+        .element2_2 {
+          grid-row-start: 2;
+          grid-column-start: 2;
+        }
+
+        .cornerstone-canvas,
+        .svg-layer {
+          left: 0;
+        }
+      }
+    }
+
+    .lesionTable {
+      width: 25%;
+      height: 100%;
+      background-color: #141313;
+      font-size: 15px;
+      overflow: auto;
+      position: relative;
+
+      .tableRow {
+        width: 100%;
+        height: 40px;
+        line-height: 40px;
+        border-bottom: 1px solid whitesmoke;
+        display: flex;
+        justify-content: space-between;
+
+        span {
+          display: block;
+          width: 17%;
+          height: 100%;
+          text-align: center;
+        }
+
+        .littleFont {
+          display: inline;
+          font-size: 11px;
+        }
+      }
+
+      .tableHead {
+        .prompt {
+          font-weight: bold;
+          font-size: large;
+          padding-top: 0;
+        }
+      }
+
+      .selectAll {
+        position: absolute;
+        top: 6px;
+        left: 180px;
+
+        span {
+          color: #fff;
+          font-size: 16px;
+        }
+      }
+
+      .CheckboxGroup {
+        width: 20px;
+        color: #fff;
+        position: absolute;
+        left: 26px;
+        top: 80px;
+        z-index: 999;
+
+        label {
+          height: 40px;
+          line-height: 40px;
+
+          span:last-of-type {
+            box-sizing: border-box;
+            padding-top: 1px;
+          }
+        }
+
+        span {
+          color: #fff;
+          font-size: 16px;
+        }
+      }
+
+      .lesionItem {
+        transition: 0.2s;
+        cursor: pointer;
+        position: relative;
+
+        .checkbox {
+          position: absolute;
+          left: 0;
+        }
+      }
+
+      .lesionItem:hover {
+        background-color: #333;
+      }
+    }
+
+    .ErrorReport {
+      width: 25%;
+      padding: 0 15px;
+      background-color: #1f1e1e;
+      text-align: left;
+      font-size: 18px;
+      line-height: 30px;
+
+      .header {
+        width: 100%;
+        height: 70px;
+        border-bottom: 1px solid #fff;
+
+        .baseInfo {
+          margin-top: 10px;
+          padding: 0 10px;
+
+          .baseInfoItem {
+            width: 120px;
+            float: left;
+          }
+        }
+      }
+
+      .body {
+        .title {
+          padding: 15px 0;
+          text-align: center;
+          font-size: 24px;
+          font-weight: bold;
+        }
+
+        .context {
+          white-space: pre-wrap;
+        }
+      }
+    }
+  }
+
+  // scroll
+  .imgShowBody .ImgShow .viewportGrid .scroll {
+    height: 100%;
+    padding: 5px;
+    position: absolute;
+    right: 0;
+    top: 0;
+    z-index: 999;
+
+    .scroll-holder {
+      height: calc(100% - 20px);
+      margin-top: 5px;
+      position: relative;
+      width: 12px;
+    }
+    .scroll-holder .imageSlider {
+      height: 12px;
+      left: 12px;
+      width: calc(41.5vh);
+      padding: 0;
+      position: absolute;
+      top: 0;
+      transform: rotate(90deg);
+      transform-origin: top left;
+      -webkit-appearance: none;
+      background-color: rgba(0, 0, 0, 0);
+    }
+    .scroll-holder .imageSlider:focus {
+      outline: none;
+    }
+    .scroll-holder .imageSlider::-moz-focus-outer {
+      border: none;
+    }
+    .scroll-holder .imageSlider::-webkit-slider-runnable-track {
+      background-color: rgba(0, 0, 0, 0);
+      border: none;
+      cursor: pointer;
+      height: 5px;
+      z-index: 6;
+    }
+    .scroll-holder .imageSlider::-moz-range-track {
+      background-color: rgba(0, 0, 0, 0);
+      border: none;
+      cursor: pointer;
+      height: 2px;
+      z-index: 6;
+    }
+    .scroll-holder .imageSlider::-ms-track {
+      animate: 0.2s;
+      background: transparent;
+      border: none;
+      border-width: 15px 0;
+      color: rgba(0, 0, 0, 0);
+      cursor: pointer;
+      height: 12px;
+      width: 100%;
+    }
+    .scroll-holder .imageSlider::-ms-fill-lower {
+      background: rgba(0, 0, 0, 0);
+    }
+    .scroll-holder .imageSlider::-ms-fill-upper {
+      background: rgba(0, 0, 0, 0);
+    }
+    .scroll-holder .imageSlider::-webkit-slider-thumb {
+      -webkit-appearance: none !important;
+      background-color: #163239;
+      border: none;
+      border-radius: 57px;
+      cursor: -webkit-grab;
+      height: 12px;
+      margin-top: -4px;
+      width: 39px;
+      cursor: pointer;
+    }
+    .scroll-holder .imageSlider::-webkit-slider-thumb:active {
+      background-color: #20a5d6;
+      cursor: -webkit-grabbing;
+    }
+    .scroll-holder .imageSlider::-moz-range-thumb {
+      background-color: #163239;
+      border: none;
+      border-radius: 57px;
+      cursor: -moz-grab;
+      height: 12px;
+      width: 39px;
+      z-index: 7;
+    }
+    .scroll-holder .imageSlider::-moz-range-thumb:active {
+      background-color: #20a5d6;
+      cursor: -moz-grabbing;
+    }
+    .scroll-holder .imageSlider::-ms-thumb {
+      background-color: #163239;
+      border: none;
+      border-radius: 57px;
+      cursor: ns-resize;
+      height: 12px;
+      width: 39px;
+    }
+    .scroll-holder .imageSlider::-ms-thumb:active {
+      background-color: #20a5d6;
+    }
+    .scroll-holder .imageSlider::-ms-tooltip {
+      display: none;
+    }
+    @media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) {
+      .imageSlider {
+        left: 50px;
+      }
+    }
+  }
+}

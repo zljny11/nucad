@@ -1,0 +1,75 @@
+.Home {
+  width: calc(100vw);
+  height: calc(100vh);
+  background-image: url('./images/backgroundImg.png');
+  background-size: cover;
+  position: relative;
+
+  .logo {
+    position: absolute;
+    height: 72px;
+    left: 15px;
+    top: 15px;
+  }
+
+  .imgButton {
+    position: absolute;
+    right: 20px;
+    top: 12px;
+
+    .menu {
+      float: left;
+      display: block;
+      margin-top: 8px;
+
+      .localBtn,
+      .licenseBtn {
+        width: 150px;
+        height: 36px;
+        font-weight: 600;
+        text-shadow: 0px 0px 10px #000;
+        border-radius: 50px 0px 0px 50px;
+        background: none;
+        color: white;
+        border: none;
+        border-right-style: solid;
+        border-width: 1px;
+        font-size: 17px;
+        border-color: whitesmoke;
+      }
+
+      .localBtn {
+        padding-top: 8px;
+      }
+
+      .licenseBtn {
+        border-right: none;
+      }
+
+      .localBtn:hover,
+      .licenseBtn:hover {
+        color: rgb(8, 74, 161);
+        cursor: pointer;
+        border-color: whitesmoke;
+      }
+    }
+  }
+
+  .logoOnly {
+    width: 400px;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .Title {
+    color: aliceblue;
+    position: fixed;
+    font-size: 40px;
+    bottom: 10%;
+    left: 50%;
+    transform: translate(-50%, 0);
+    text-shadow: 0px 0px 10px #000;
+  }
+}
