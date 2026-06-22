@@ -326,7 +326,29 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
               maskState.mode === "erase" ? "chosenIconfont" : "NewIconfont"
             }
           >
-            &#xe8a4;
+            <svg
+              className="eraserIcon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M16.8 3.7 21 7.9c.8.8.8 2 0 2.8l-8.9 8.9c-.4.4-.9.6-1.4.6H4.4c-.5 0-.8-.6-.5-1l3-4.8L14 3.7c.8-.8 2-.8 2.8 0Z"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+              />
+              <path
+                d="M7.7 14.2 12.5 19M12.5 8l4.8 4.8"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+              />
+            </svg>
           </div>
           <div>橡皮</div>
         </div>
@@ -379,7 +401,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         ) : null}
       </div>
 
-      <div className="name">
+      <div className="maskStatusFloating">
         NuCAD
         <div className="maskStatus">
           <div>

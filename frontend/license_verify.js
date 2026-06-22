@@ -3,7 +3,8 @@ const crypto = require('crypto');
 const path = require('path')
 const Store = require('electron-store');
 const store = new Store();
-const userData = store.get('address') || require('electron').app.getPath('userData')
+const electron = require('electron');
+const userData = store.get('address') || (electron.app ? electron.app.getPath('userData') : process.cwd())
 const sep = path.sep;
 const os = require("os");
 

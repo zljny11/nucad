@@ -101,6 +101,12 @@ interface MaskSessionState {
   historyTimer: ReturnType<typeof setTimeout> | null;
 }
 
+interface MaskLoadingState {
+  active: boolean;
+  percent: number;
+  text: string;
+}
+
 const createInitialMaskSessionState = (): MaskSessionState => ({
   segmentationId: "",
   segmentationRepresentationUID: "",
@@ -252,6 +258,10 @@ const createViewportAndRender = async (
   volumes: Record<string, any>[],
   pflag: string
 ) => {
+  if (!elements || elements.length < 4) {
+    throw new Error("Viewport DOM elements are not ready");
+  }
+
   const viewportInput = [
     {
       viewportId: viewportIds[0],
@@ -389,8 +399,29 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const [PET_CT_Index, setPET_CT_Index] = useState(0);
   const [MPR, setMPR] = useState("AXIAL");
   const [maskBanner, setMaskBanner] = useState("");
+  const [maskLoading, setMaskLoading] = useState<MaskLoadingState>({
+    active: false,
+    percent: 0,
+    text: "",
+  });
   const preMPR = useRef("AXIAL");
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
+
+  const setMaskLoadingProgress = (percent: number, text: string) => {
+    setMaskLoading({
+      active: true,
+      percent,
+      text,
+    });
+  };
+
+  const finishMaskLoadingProgress = () => {
+    setMaskLoading((previous) => ({
+      ...previous,
+      active: false,
+      percent: 100,
+    }));
+  };
 
   const publishMaskState = () => {
     const maskSession = maskSessionRef.current;
@@ -492,16 +523,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   const initializeSegmentation = async () => {
+    setMaskLoadingProgress(5, "Initializing Mask...");
     if (pflag === "2" || !volumeIds.length) {
       updateMaskState({
         ready: false,
         source: "none",
         message: "当前病例无可编辑Mask",
       });
+      finishMaskLoadingProgress();
       return;
     }
 
     const referencedVolume = cache.getVolume(volumeIds[0]);
+    setMaskLoadingProgress(15, "Reading reference volume...");
 
     if (!referencedVolume) {
       updateMaskState({
@@ -509,6 +543,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         source: "error",
         message: "未找到参考体数据，无法初始化Mask",
       });
+      finishMaskLoadingProgress();
       return;
     }
 
@@ -520,7 +555,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     if (outputPath) {
       try {
+        setMaskLoadingProgress(30, "Loading saved segmentation...");
         const response = await loadSegmentation(seriesId, outputPath);
+        setMaskLoadingProgress(55, "Preparing segmentation data...");
 
         if (
           response.success &&
@@ -529,6 +566,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
           response.dimensions
         ) {
           const loadedMask = base64ToUint8Array(response.scalarDataBase64);
+          setMaskLoadingProgress(70, "Checking mask dimensions...");
           const expectedLength =
             response.dimensions[0] * response.dimensions[1] * response.dimensions[2];
 
@@ -566,10 +604,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       message = "当前病例缺少outputPath，无法加载算法Mask";
     }
 
+    setMaskLoadingProgress(85, "Creating editable overlay...");
     const runtimeSuffix = `${seriesId}:${Date.now()}`;
     const segmentationId = `${SEGMENTATION_ID_PREFIX}:${runtimeSuffix}`;
     const segmentationVolumeId = `${SEGMENTATION_VOLUME_PREFIX}:${runtimeSuffix}`;
-    const segmentationVolume = await volumeLoader.createLocalSegmentationVolume(
+    const segmentationVolume = await volumeLoader.createLocalVolume(
       {
         metadata: referencedVolume.metadata,
         dimensions: referencedVolume.dimensions,
@@ -577,7 +616,6 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         origin: referencedVolume.origin,
         direction: referencedVolume.direction,
         scalarData,
-        referencedVolumeId: volumeIds[0],
       },
       segmentationVolumeId
     );
@@ -608,6 +646,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       segmentationRepresentationUID
     );
     segmentation.segmentIndex.setActiveSegmentIndex(segmentationId, 1);
+    setMaskLoadingProgress(100, "Mask ready");
 
     updateMaskState({
       segmentationId,
@@ -629,6 +668,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       ),
       mode: "none",
     });
+    window.setTimeout(finishMaskLoadingProgress, 350);
   };
 
   const setMaskMode = (mode: "none" | "brush" | "erase") => {
@@ -656,6 +696,15 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       mode,
       message: mode === "erase" ? "橡皮模式已启用" : "画刷模式已启用",
     });
+  };
+
+  const clearBrushCursor = () => {
+    const brushTool = (VolumeToolGroup as any).getToolInstance?.(
+      BrushTool.toolName
+    );
+
+    brushTool?.disableCursor?.();
+    renderingEngine?.render();
   };
 
   const toggleMaskVisibility = () => {
@@ -807,6 +856,26 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
   useEffect(() => {
     updateMaskState(createInitialMaskSessionState());
+    const brushCursorHandlers: Array<{
+      element: Element;
+      enter: EventListener;
+      leave: EventListener;
+    }> = [];
+    const attachBrushCursorHandlers = () => {
+      if (!elements || !elements.length || brushCursorHandlers.length) {
+        return;
+      }
+
+      Object.values(elements).forEach((element) => {
+        const enter = () => clearBrushCursor();
+        const leave = () => clearBrushCursor();
+
+        element.addEventListener("pointerenter", enter);
+        element.addEventListener("pointerleave", leave);
+        brushCursorHandlers.push({ element, enter, leave });
+      });
+    };
+
     volumes = initAndGetImageIds(
       renderingEngineId,
       inputPath,
@@ -815,6 +884,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       pflag
     );
     volumes.then(async (value) => {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
       await createViewportAndRender(
         elements,
         renderingEngineId,
@@ -824,6 +894,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         value,
         pflag
       );
+      attachBrushCursorHandlers();
       wheelEventListener(
         viewportIds,
         setPET_AXIAL_Index,
@@ -914,6 +985,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       PubSub.unsubscribe(undoToken);
       PubSub.unsubscribe(redoToken);
       PubSub.unsubscribe(saveToken);
+      brushCursorHandlers.forEach(({ element, enter, leave }) => {
+        element.removeEventListener("pointerenter", enter);
+        element.removeEventListener("pointerleave", leave);
+      });
       if (maskSessionRef.current.historyTimer) {
         clearTimeout(maskSessionRef.current.historyTimer);
       }
@@ -962,6 +1037,20 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   return (
     <div className="ImgShow" id="content">
       {maskBanner ? <div className="maskBanner">{maskBanner}</div> : null}
+      {maskLoading.active ? (
+        <div className="maskLoading">
+          <div className="maskLoadingText">
+            <span>{maskLoading.text}</span>
+            <span>{maskLoading.percent}%</span>
+          </div>
+          <div className="maskProgressTrack">
+            <div
+              className="maskProgressFill"
+              style={{ width: `${maskLoading.percent}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="viewportGrid" id="viewportGrid">
         <div className="element element1_1">
           <div
