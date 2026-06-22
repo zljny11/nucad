@@ -370,7 +370,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           className={maskState.canUndo ? "buttonContainer" : "buttonContainer disabledAction"}
           onClick={() => maskState.canUndo && PubSub.publish(MASK_UNDO_TOPIC)}
         >
-          <div className={maskState.canUndo ? "NewIconfont" : "disabledButton"}>
+          <div className="NewIconfont">
             &#xe8a4;
           </div>
           <div>撤销</div>
@@ -379,8 +379,30 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           className={maskState.canRedo ? "buttonContainer" : "buttonContainer disabledAction"}
           onClick={() => maskState.canRedo && PubSub.publish(MASK_REDO_TOPIC)}
         >
-          <div className={maskState.canRedo ? "NewIconfont" : "disabledButton"}>
-            &#xe8a3;
+          <div className="NewIconfont">
+            <svg
+              className="redoIcon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M17.8 8.2A7 7 0 1 0 19 12"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+              />
+              <path
+                d="M17.8 3.8v4.4h4.4"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+              />
+            </svg>
           </div>
           <div>重做</div>
         </div>

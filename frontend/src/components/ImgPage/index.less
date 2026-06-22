@@ -61,6 +61,13 @@
           vertical-align: middle;
         }
 
+        .redoIcon {
+          width: 28px;
+          height: 28px;
+          display: inline-block;
+          vertical-align: middle;
+        }
+
         > div:last-child {
           margin-top: 2px;
           overflow: hidden;
@@ -267,6 +274,14 @@
     }
 
     .lesionTable {
+      @lesionCheckboxWidth: 32px;
+      @lesionIndexWidth: 64px;
+      @lesionVolumeWidth: 86px;
+      @lesionSuvMaxWidth: 86px;
+      @lesionSuvMeanWidth: 96px;
+      @lesionAreaWidth: 180px;
+      @lesionTableContentWidth: @lesionCheckboxWidth + @lesionIndexWidth + @lesionVolumeWidth + @lesionSuvMaxWidth + @lesionSuvMeanWidth + @lesionAreaWidth;
+
       width: 20%;
       height: 100%;
       background-color: #141313;
@@ -275,18 +290,45 @@
       position: relative;
 
       .tableRow {
-        width: 100%;
+        width: @lesionTableContentWidth;
+        min-width: 100%;
         height: 40px;
         line-height: 40px;
         border-bottom: 1px solid whitesmoke;
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-start;
+        padding-left: @lesionCheckboxWidth;
+        box-sizing: border-box;
 
         span {
           display: block;
-          width: 17%;
+          flex: 0 0 auto;
           height: 100%;
+          padding: 0 8px;
+          box-sizing: border-box;
           text-align: center;
+          white-space: nowrap;
+        }
+
+        span:nth-child(1) {
+          width: @lesionIndexWidth;
+        }
+
+        span:nth-child(2) {
+          width: @lesionVolumeWidth;
+        }
+
+        span:nth-child(3) {
+          width: @lesionSuvMaxWidth;
+        }
+
+        span:nth-child(4) {
+          width: @lesionSuvMeanWidth;
+        }
+
+        span:last-child {
+          width: @lesionAreaWidth;
+          text-align: left;
         }
 
         .littleFont {
@@ -296,11 +338,17 @@
       }
 
       .tableHead {
+        min-width: 100%;
+
         .prompt {
           font-weight: bold;
           font-size: large;
           padding-top: 0;
         }
+      }
+
+      .tableHead:first-child {
+        padding-left: 0;
       }
 
       .selectAll {
@@ -315,20 +363,23 @@
       }
 
       .CheckboxGroup {
-        width: 20px;
+        width: @lesionTableContentWidth;
+        min-width: 100%;
         color: #fff;
         position: absolute;
-        left: 26px;
+        left: 6px;
         top: 80px;
         z-index: 999;
 
         label {
+          width: 20px;
           height: 40px;
           line-height: 40px;
+          margin-left: 0;
+          overflow: hidden;
 
-          span:last-of-type {
-            box-sizing: border-box;
-            padding-top: 1px;
+          .ant-checkbox + span {
+            display: none;
           }
         }
 

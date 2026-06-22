@@ -114,18 +114,11 @@ const LesionTable: React.FC = () => {
             key={data[0]}
             onClick={() => jumpFun(data[2], index)}
           >
-            {data.map((content, i) =>
-              i === 1 ? (
-                <span key={i}></span>
-              ) : i === 5 || i === 6 || i === 7 ? (
-                <span key={i}>
-                  {parseFloat(content).toFixed(2)}
-                  {i === 5 ? "ml" : ""}
-                </span>
-              ) : i === 15 ? (
-                <span key={i}>{translateFocalAreas(content)}</span>
-              ) : null
-            )}
+            <span>{index + 1}</span>
+            <span>{parseFloat(data[5]).toFixed(2)}ml</span>
+            <span>{parseFloat(data[6]).toFixed(2)}</span>
+            <span>{parseFloat(data[7]).toFixed(2)}</span>
+            <span>{translateFocalAreas(data[15])}</span>
           </div>
         );
       })}

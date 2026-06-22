@@ -3,11 +3,13 @@
 
 .Report {
   width: 100%;
-  min-height: 100vh;
-  position: absolute;
+  height: 100vh;
+  position: fixed;
   top: 0;
   left: 0;
-  z-index: 999;
+  z-index: 2000;
+  overflow-x: auto;
+  overflow-y: auto;
   background-color: #eee;
 
   .reportViewport {
@@ -19,7 +21,7 @@
       background-color: #fff;
       position: fixed;
       top: 0;
-      z-index: 1000;
+      z-index: 2001;
 
       .logo {
         height: 72px;

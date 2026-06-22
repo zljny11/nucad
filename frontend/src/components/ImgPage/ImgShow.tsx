@@ -400,9 +400,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const [MPR, setMPR] = useState("AXIAL");
   const [maskBanner, setMaskBanner] = useState("");
   const [maskLoading, setMaskLoading] = useState<MaskLoadingState>({
-    active: false,
-    percent: 0,
-    text: "",
+    active: true,
+    percent: 1,
+    text: "Loading image data...",
   });
   const preMPR = useRef("AXIAL");
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
@@ -523,7 +523,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   const initializeSegmentation = async () => {
-    setMaskLoadingProgress(5, "Initializing Mask...");
+    setMaskLoadingProgress(22, "Initializing Mask...");
     if (pflag === "2" || !volumeIds.length) {
       updateMaskState({
         ready: false,
@@ -535,7 +535,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     const referencedVolume = cache.getVolume(volumeIds[0]);
-    setMaskLoadingProgress(15, "Reading reference volume...");
+    setMaskLoadingProgress(32, "Reading reference volume...");
 
     if (!referencedVolume) {
       updateMaskState({
@@ -555,9 +555,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     if (outputPath) {
       try {
-        setMaskLoadingProgress(30, "Loading saved segmentation...");
+        setMaskLoadingProgress(45, "Loading saved segmentation...");
         const response = await loadSegmentation(seriesId, outputPath);
-        setMaskLoadingProgress(55, "Preparing segmentation data...");
+        setMaskLoadingProgress(62, "Preparing segmentation data...");
 
         if (
           response.success &&
@@ -566,7 +566,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
           response.dimensions
         ) {
           const loadedMask = base64ToUint8Array(response.scalarDataBase64);
-          setMaskLoadingProgress(70, "Checking mask dimensions...");
+          setMaskLoadingProgress(74, "Checking mask dimensions...");
           const expectedLength =
             response.dimensions[0] * response.dimensions[1] * response.dimensions[2];
 
@@ -604,7 +604,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       message = "当前病例缺少outputPath，无法加载算法Mask";
     }
 
-    setMaskLoadingProgress(85, "Creating editable overlay...");
+    setMaskLoadingProgress(88, "Creating editable overlay...");
     const runtimeSuffix = `${seriesId}:${Date.now()}`;
     const segmentationId = `${SEGMENTATION_ID_PREFIX}:${runtimeSuffix}`;
     const segmentationVolumeId = `${SEGMENTATION_VOLUME_PREFIX}:${runtimeSuffix}`;
@@ -856,6 +856,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
   useEffect(() => {
     updateMaskState(createInitialMaskSessionState());
+    setMaskLoadingProgress(1, "Loading image data...");
     const brushCursorHandlers: Array<{
       element: Element;
       enter: EventListener;
@@ -884,6 +885,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       pflag
     );
     volumes.then(async (value) => {
+      setMaskLoadingProgress(8, "Preparing viewports...");
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
       await createViewportAndRender(
         elements,
@@ -894,6 +896,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         value,
         pflag
       );
+      setMaskLoadingProgress(18, "Rendering image volumes...");
       attachBrushCursorHandlers();
       wheelEventListener(
         viewportIds,
@@ -918,6 +921,13 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         getImageSliceDataForVolumeViewport(viewport_PET).imageIndex + 1
       );
       await initializeSegmentation();
+    }).catch(() => {
+      updateMaskState({
+        ready: false,
+        source: "error",
+        message: "影像数据加载失败，无法初始化Mask",
+      });
+      finishMaskLoadingProgress();
     });
     const jumpToken = PubSub.subscribe("imgJumpByIndex", (msg, data) => {
       viewportIds.forEach((viewportId, index) => {
