@@ -1,0 +1,12 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{png,jpg,jpeg,gif,ico,woff,woff2,ttf,eot,dcm,nii,gz,tar,zip}]
+charset = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

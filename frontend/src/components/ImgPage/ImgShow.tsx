@@ -97,8 +97,10 @@ interface MaskSessionState {
   undoStack: Uint8Array[];
   redoStack: Uint8Array[];
   committedSnapshot: Uint8Array | null;
+  savedSnapshot: Uint8Array | null;
   pendingHistory: boolean;
   historyTimer: ReturnType<typeof setTimeout> | null;
+  suppressHistory: boolean;
 }
 
 interface MaskLoadingState {
@@ -115,7 +117,7 @@ const createInitialMaskSessionState = (): MaskSessionState => ({
   visible: true,
   ready: false,
   source: "none",
-  message: "Mask未初始化",
+  message: "Mask not initialized",
   mode: "none",
   brushSize: 25,
   dirty: false,
@@ -124,8 +126,10 @@ const createInitialMaskSessionState = (): MaskSessionState => ({
   undoStack: [],
   redoStack: [],
   committedSnapshot: null,
+  savedSnapshot: null,
   pendingHistory: false,
   historyTimer: null,
+  suppressHistory: false,
 });
 
 const base64ToUint8Array = (base64: string) => {
@@ -153,6 +157,29 @@ const uint8ArrayToBase64 = (data: Uint8Array) => {
 };
 
 const cloneScalarData = (data: Uint8Array) => new Uint8Array(data);
+
+const getViewportOrThrow = (viewportId: string) => {
+  const viewport = renderingEngine.getViewport(viewportId) as Types.IVolumeViewport;
+
+  if (!viewport) {
+    throw new Error(`Viewport is not ready: ${viewportId}`);
+  }
+
+  return viewport;
+};
+
+const getViewportDimensionsOrThrow = (
+  viewport: Types.IVolumeViewport,
+  volumeId: string
+) => {
+  const imageData = viewport.getImageData?.(volumeId);
+
+  if (!imageData) {
+    throw new Error(`Volume image data is not ready: ${volumeId}`);
+  }
+
+  return imageData.dimensions;
+};
 
 const wheelEventListener = (
   viewportIds: string[],
@@ -234,6 +261,10 @@ const initAndGetImageIds = async (
       imageIds_CT.length > imageIds_PET_IN.length
         ? imageIds_CT.length
         : imageIds_PET_IN.length;
+  }
+
+  if (!imageIds.length || imageIds.some((group) => !group.length)) {
+    throw new Error("No readable image files were found for the selected study.");
   }
 
   const volumes: Record<string, any>[] = [];
@@ -449,6 +480,24 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const getSegmentationVolume = () =>
     cache.getVolume(maskSessionRef.current.segmentationVolumeId);
 
+  const setMaskActorsVisibility = (visible: boolean) => {
+    const maskSession = maskSessionRef.current;
+
+    if (!renderingEngine || !maskSession.segmentationRepresentationUID) {
+      return;
+    }
+
+    viewportIds.forEach((viewportId) => {
+      const viewport = renderingEngine.getViewport(viewportId) as Types.IVolumeViewport;
+      const actorEntry = viewport?.getActor?.(
+        maskSession.segmentationRepresentationUID
+      );
+
+      actorEntry?.actor?.setVisibility?.(visible);
+      viewport?.render?.();
+    });
+  };
+
   const triggerSegmentationRender = () => {
     const maskSession = maskSessionRef.current;
 
@@ -460,9 +509,13 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       maskSession.segmentationId
     );
     renderingEngine?.render();
+    window.setTimeout(() => setMaskActorsVisibility(maskSession.visible), 0);
   };
 
-  const applyScalarDataToSegmentation = (nextData: Uint8Array) => {
+  const applyScalarDataToSegmentation = (
+    nextData: Uint8Array,
+    options: { recordHistory?: boolean } = {}
+  ) => {
     const segmentationVolume = getSegmentationVolume();
 
     if (!segmentationVolume) {
@@ -471,7 +524,25 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     const scalarData = segmentationVolume.getScalarData() as Uint8Array;
     scalarData.set(nextData);
-    triggerSegmentationRender();
+    const shouldRecordHistory = options.recordHistory !== false;
+    maskSessionRef.current.suppressHistory = !shouldRecordHistory;
+
+    try {
+      triggerSegmentationRender();
+    } finally {
+      maskSessionRef.current.suppressHistory = false;
+    }
+  };
+
+  const clearPendingHistoryTimer = () => {
+    const maskSession = maskSessionRef.current;
+
+    if (maskSession.historyTimer) {
+      clearTimeout(maskSession.historyTimer);
+      maskSession.historyTimer = null;
+    }
+
+    maskSession.pendingHistory = false;
   };
 
   const finalizeHistoryStep = () => {
@@ -490,16 +561,20 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       pendingHistory: false,
       dirty: true,
       canUndo: maskSessionRef.current.undoStack.length > 0,
-      canRedo: maskSessionRef.current.redoStack.length > 0,
+      canRedo: maskSessionRef.current.savedSnapshot !== null,
       message:
         maskSessionRef.current.source === "none"
-          ? "空白Mask已编辑"
-          : "Mask已修改，尚未保存",
+          ? "Blank mask edited"
+          : "Mask updated and not saved",
     });
   };
 
   const queueHistorySnapshot = () => {
     const maskSession = maskSessionRef.current;
+
+    if (maskSession.suppressHistory) {
+      return;
+    }
 
     if (!maskSession.committedSnapshot) {
       return;
@@ -518,7 +593,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     maskSession.historyTimer = setTimeout(finalizeHistoryStep, 250);
     updateMaskState({
       canUndo: maskSession.undoStack.length > 0,
-      canRedo: false,
+      canRedo: maskSession.savedSnapshot !== null,
     });
   };
 
@@ -528,7 +603,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       updateMaskState({
         ready: false,
         source: "none",
-        message: "当前病例无可编辑Mask",
+        message: "当前模式暂不支持Mask",
       });
       finishMaskLoadingProgress();
       return;
@@ -541,7 +616,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       updateMaskState({
         ready: false,
         source: "error",
-        message: "未找到参考体数据，无法初始化Mask",
+        message: "当前病例无可编辑Mask",
       });
       finishMaskLoadingProgress();
       return;
@@ -594,7 +669,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
           }
         } else if (!response.success) {
           source = "error";
-          message = response.message || "Mask加载失败";
+          message = response.message || "Mask failed to load";
         }
       } catch (error) {
         source = "error";
@@ -666,6 +741,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       committedSnapshot: cloneScalarData(
         segmentationVolume.getScalarData() as Uint8Array
       ),
+      savedSnapshot: cloneScalarData(
+        segmentationVolume.getScalarData() as Uint8Array
+      ),
       mode: "none",
     });
     window.setTimeout(finishMaskLoadingProgress, 350);
@@ -694,7 +772,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
     updateMaskState({
       mode,
-      message: mode === "erase" ? "橡皮模式已启用" : "画刷模式已启用",
+      message: mode === "erase" ? "Erase mode enabled" : "Brush mode enabled",
     });
   };
 
@@ -715,15 +793,17 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     const nextVisibility = !maskSession.visible;
-    segmentation.config.visibility.setSegmentationVisibility(
+    segmentation.config.visibility.setSegmentVisibility(
       VolumeToolGroup.id,
       maskSession.segmentationRepresentationUID,
+      1,
       nextVisibility
     );
+    setMaskActorsVisibility(nextVisibility);
     renderingEngine?.render();
     updateMaskState({
       visible: nextVisibility,
-      message: nextVisibility ? "Mask已显示" : "Mask已隐藏",
+      message: nextVisibility ? "Mask visible" : "Mask hidden",
     });
   };
 
@@ -734,7 +814,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     setBrushSizeForToolGroup(VolumeToolGroup.id, nextSize);
     updateMaskState({
       brushSize: nextSize,
-      message: `画刷半径已调整为 ${nextSize}`,
+      message: `Brush radius set to ${nextSize}`,
     });
   };
 
@@ -744,6 +824,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     if (!maskSession.undoStack.length) {
       return;
     }
+
+    clearPendingHistoryTimer();
 
     const segmentationVolume = getSegmentationVolume();
 
@@ -761,46 +843,35 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     maskSession.redoStack.push(currentSnapshot);
-    applyScalarDataToSegmentation(previousSnapshot);
+    applyScalarDataToSegmentation(previousSnapshot, { recordHistory: false });
     updateMaskState({
       committedSnapshot: cloneScalarData(previousSnapshot),
       canUndo: maskSession.undoStack.length > 0,
       canRedo: true,
       dirty: true,
-      message: "已撤销上一步Mask编辑",
+      message: "Undid the previous mask edit",
     });
   };
 
   const redoMaskEdit = () => {
     const maskSession = maskSessionRef.current;
 
-    if (!maskSession.redoStack.length) {
+    if (!maskSession.savedSnapshot) {
       return;
     }
 
-    const segmentationVolume = getSegmentationVolume();
-
-    if (!segmentationVolume) {
-      return;
-    }
-
-    const currentSnapshot = cloneScalarData(
-      segmentationVolume.getScalarData() as Uint8Array
-    );
-    const nextSnapshot = maskSession.redoStack.pop();
-
-    if (!nextSnapshot) {
-      return;
-    }
-
-    maskSession.undoStack.push(currentSnapshot);
-    applyScalarDataToSegmentation(nextSnapshot);
+    clearPendingHistoryTimer();
+    applyScalarDataToSegmentation(maskSession.savedSnapshot, {
+      recordHistory: false,
+    });
     updateMaskState({
-      committedSnapshot: cloneScalarData(nextSnapshot),
-      canUndo: true,
-      canRedo: maskSession.redoStack.length > 0,
-      dirty: true,
-      message: "已恢复Mask编辑",
+      committedSnapshot: cloneScalarData(maskSession.savedSnapshot),
+      undoStack: [],
+      redoStack: [],
+      canUndo: false,
+      canRedo: false,
+      dirty: false,
+      message: "已恢复到上一次保存的Mask",
     });
   };
 
@@ -811,7 +882,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     if (!maskSession.ready || !segmentationVolume || !referencedVolume || !outputPath) {
       updateMaskState({
-        message: "当前病例缺少保存Mask所需的信息",
+        message: "Missing information required to save the mask",
       });
       return;
     }
@@ -842,14 +913,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         dirty: false,
         source: "doctor",
         committedSnapshot: cloneScalarData(scalarData),
+        savedSnapshot: cloneScalarData(scalarData),
+        undoStack: [],
+        redoStack: [],
+        canUndo: false,
+        canRedo: false,
         message:
           scalarData.some((value) => value > 0)
-            ? "Mask已保存为医生修订版"
-            : "已保存空白Mask，可作为医生确认阴性结果",
+            ? "Mask saved as doctor revision"
+            : "Saved a blank mask for a confirmed negative result",
       });
     } catch (error) {
       updateMaskState({
-        message: "Mask保存失败",
+        message: "Mask save failed",
       });
     }
   };
@@ -1252,3 +1328,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 };
 
 export default ImgShow;
+
+
+
+
+

@@ -1,3 +1,4 @@
+import { Enums as CoreEnums } from "@cornerstonejs/core";
 import * as cornerstoneTools from "@cornerstonejs/tools";
 import { renderingEngineId, viewportIds } from "./getConstant";
 
@@ -71,13 +72,13 @@ function getReferenceLineSlabThicknessControlsOn(viewportId: string) {
   return index !== -1;
 }
 
-const setToolPassiveFun = (ToolGroup: cornerstoneTools.Types.IToolGroup) => {
+function setToolPassiveFun(ToolGroup: cornerstoneTools.Types.IToolGroup) {
   ToolGroup.setToolPassive(WindowLevelTool.toolName);
   ToolGroup.setToolPassive(ZoomTool.toolName);
   ToolGroup.setToolPassive(PanTool.toolName);
   ToolGroup.setToolPassive(DragProbeTool.toolName);
   ToolGroup.setToolPassive(BrushTool.toolName);
-};
+}
 
 VolumeToolGroup.addTool(StackScrollMouseWheelTool.toolName);
 VolumeToolGroup.addTool(WindowLevelTool.toolName);
@@ -85,6 +86,20 @@ VolumeToolGroup.addTool(ZoomTool.toolName);
 VolumeToolGroup.addTool(PanTool.toolName);
 VolumeToolGroup.addTool(DragProbeTool.toolName);
 VolumeToolGroup.addTool(CrosshairsTool.toolName, {
+  shadow: true,
+  viewportIndicators: true,
+  autoPan: {
+    enabled: false,
+    panSize: 10,
+  },
+  referenceLinesCenterGapRadius: 20,
+  filterActorUIDsToSetSlabThickness: [],
+  slabThicknessBlendMode: CoreEnums.BlendModes.MAXIMUM_INTENSITY_BLEND,
+  mobile: {
+    enabled: false,
+    opacity: 0.8,
+    handleRadius: 9,
+  },
   getReferenceLineColor,
   getReferenceLineControllable,
   getReferenceLineDraggableRotatable,

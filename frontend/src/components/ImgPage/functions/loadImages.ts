@@ -8,10 +8,16 @@ const dicomParser = require("dicom-parser");
 
 const loadImages = (pathFolder: string, flag: string) => {
   if (!fs || !path) {
-    return [];
+    throw new Error('Local image loading requires the Electron desktop app.');
   }
-  //对应图像文件夹的名字
-  let filespath = fs.readdirSync(pathFolder); //是个数组，元素是图的名字
+  if (!fs.existsSync(pathFolder)) {
+    throw new Error('Image folder does not exist: ' + pathFolder);
+  }
+  // 对应影像文件夹中的文件名
+  let filespath = fs.readdirSync(pathFolder); // 读取目录下文件
+  if (!filespath.length) {
+    throw new Error('No DICOM files found in folder: ' + pathFolder);
+  }
   let map = {};
   let arr = [];
   let imageIds = [];

@@ -83,26 +83,46 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     };
   }, []);
 
+  const disableCrosshairs = () => {
+    VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
+    setCrosshairsActive(false);
+  };
+
   const goBackListPage = () => {
     if (volumeLoaded.current) {
       removeVoiSynchronizers();
-      removeVoiSynchronizers();
       setToolPassiveFun(VolumeToolGroup);
-      VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
+      disableCrosshairs();
       navigate("/ListPage");
     }
   };
 
   const handleLeftClicked = (toolName: string) => {
+    if (!volumeLoaded.current) {
+      return;
+    }
+
+    if (curTool === toolName) {
+      if (toolName === "WindowLevelTool" && voiSync) {
+        removeVoiSynchronizers();
+        setVoiSync(false);
+      }
+      setToolPassiveFun(VolumeToolGroup);
+      PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+      setCurTool("");
+      return;
+    }
+
     if (toolName !== "WindowLevelTool" && voiSync) setVoiSyncFun();
+    disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
-    PubSub.publish(MASK_SET_MODE_TOPIC, "none");
+    PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
     switch (toolName) {
       case "ZoomTool":
         VolumeToolGroup.setToolActive(ZoomTool.toolName, {
           bindings: [
             {
-              mouseButton: MouseBindings.Primary, // Left Click
+              mouseButton: MouseBindings.Primary,
             },
           ],
         });
@@ -111,7 +131,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         VolumeToolGroup.setToolActive(PanTool.toolName, {
           bindings: [
             {
-              mouseButton: MouseBindings.Primary, // Left Click
+              mouseButton: MouseBindings.Primary,
             },
           ],
         });
@@ -120,7 +140,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         VolumeToolGroup.setToolActive(DragProbeTool.toolName, {
           bindings: [
             {
-              mouseButton: MouseBindings.Primary, // Left Click
+              mouseButton: MouseBindings.Primary,
             },
           ],
         });
@@ -129,7 +149,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         VolumeToolGroup.setToolActive(WindowLevelTool.toolName, {
           bindings: [
             {
-              mouseButton: MouseBindings.Primary, // Left Click
+              mouseButton: MouseBindings.Primary,
             },
           ],
         });
@@ -144,11 +164,19 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     if (!maskState.ready) {
       return;
     }
+
+    if (maskState.mode === mode) {
+      PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+      setCurTool("");
+      return;
+    }
+
     if (voiSync) {
       setVoiSyncFun();
     }
+    disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
-    PubSub.publish(MASK_SET_MODE_TOPIC, mode);
+    PubSub.publishSync(MASK_SET_MODE_TOPIC, mode);
     setCurTool(BrushTool.toolName);
   };
 
@@ -160,23 +188,39 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
   };
 
   const setVoiSyncFun = () => {
+    if (!volumeLoaded.current) {
+      return;
+    }
     if (voiSync) {
       removeVoiSynchronizers();
     } else {
-      handleLeftClicked("WindowLevelTool");
+      disableCrosshairs();
+      setToolPassiveFun(VolumeToolGroup);
+      PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+      VolumeToolGroup.setToolActive(WindowLevelTool.toolName, {
+        bindings: [
+          {
+            mouseButton: MouseBindings.Primary,
+          },
+        ],
+      });
+      setCurTool("WindowLevelTool");
       setUpVoiSynchronizers();
     }
     setVoiSync(!voiSync);
   };
 
   const toogleCrosshairsTool = () => {
+    if (!volumeLoaded.current) {
+      return;
+    }
     if (crosshairsActive) {
       VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
     } else {
       VolumeToolGroup.setToolActive(CrosshairsTool.toolName, {
         bindings: [
           {
-            mouseButton: MouseBindings.Secondary, // Right Click
+            mouseButton: MouseBindings.Secondary,
           },
         ],
       });
@@ -185,10 +229,20 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
   };
 
   const resetImage = () => {
+    if (!volumeLoaded.current) {
+      return;
+    }
+    disableCrosshairs();
+    setToolPassiveFun(VolumeToolGroup);
+    PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+    setCurTool("");
     const renderingEngine = getRenderingEngine(renderingEngineId);
+    if (!renderingEngine) {
+      return;
+    }
     viewportIds.forEach((viewportId) => {
       const viewport = renderingEngine.getViewport(viewportId);
-      viewport.resetCamera(true, true, false); // resetPan, resetZoom, resetToCenter
+      viewport.resetCamera(true, true, false);
       viewport.render();
     });
   };
@@ -293,7 +347,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
         <div className="buttonContainer" onClick={resetImage}>
           <div className="NewIconfont">&#xe6ad;</div>
-          <div>重置图像</div>
+          <div>重置影像</div>
         </div>
         <div
           className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
@@ -448,3 +502,6 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 };
 
 export default ImgShowHeader;
+
+
+

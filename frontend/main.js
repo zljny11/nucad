@@ -9,7 +9,6 @@ let receiveWindow = null;
 // Menu.setApplicationMenu(null)
 
 const Store = require('electron-store');
-Store.initRenderer();
 const store = new Store();
 const userDataPath = store.get('address') || app.getPath('userData');
 store.set('address', userDataPath);
@@ -85,7 +84,7 @@ app.on('ready', () => {
     });
   });
 
-  // 加载应用----适用于 react 项目
+  // 鍔犺浇搴旂敤----閫傜敤浜?react 椤圭洰
   mainWindow.loadURL('http://localhost:3002/');
   // mainWindow.loadURL(url.format({
   //   pathname: path.join(__dirname, './build/index.html'),
@@ -107,7 +106,7 @@ app.on('ready', () => {
     mainWindow.setFullScreen(false)
   })
 
-  // 关闭window时触发下列事件.
+  // 鍏抽棴window鏃惰Е鍙戜笅鍒椾簨浠?
   mainWindow.on('closed', function () {
     mainWindow = null
     receiveWindow.close()
