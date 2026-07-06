@@ -17,10 +17,10 @@ const ImgPage: React.FC = () => {
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const { seriesId, pflag } = patientInfo;
   const selectedLesions = useRef<string[]>([]);
-  const volumeLoaded = useRef<boolean>(true);
+  const volumeLoaded = useRef<boolean>(false);
 
   let volumeIds = null;
-  if (pflag === "2") {
+  if (pflag === "2" || pflag === "6") {
     volumeIds = [petInVolumeId + seriesId, ctVolumeId + seriesId];
   } else {
     volumeIds = [
@@ -36,7 +36,7 @@ const ImgPage: React.FC = () => {
         <ImgShowHeader pflag={pflag} />
         <div className="imgShowBody">
           <ImgShow volumeIds={volumeIds} />
-          {pflag === "1" ? <LesionTable /> : <ErrorReport />}
+          {pflag === "1" ? <LesionTable /> : pflag === "6" ? null : <ErrorReport />}
         </div>
         <Report />
       </ImgPageContext.Provider>

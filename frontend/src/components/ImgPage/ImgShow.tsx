@@ -242,7 +242,7 @@ const initAndGetImageIds = async (
     outputPath + "/out/out",
   ];
   let imageIds: string[][] = [];
-  if (pflag === "2") {
+  if (pflag === "2" || pflag === "6") {
     const imageIds_PET_IN = loadImages(path[1], "PET_IN");
     const imageIds_CT = loadImages(path[0], "CT");
     imageIds = [imageIds_PET_IN, imageIds_CT];
@@ -599,11 +599,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
   const initializeSegmentation = async () => {
     setMaskLoadingProgress(22, "Initializing Mask...");
-    if (pflag === "2" || !volumeIds.length) {
+    if (pflag === "2" || pflag === "6" || !volumeIds.length) {
       updateMaskState({
         ready: false,
         source: "none",
-        message: "当前模式暂不支持Mask",
+        message: pflag === "6" ? "本地导入病例未加载算法Mask" : "当前模式暂不支持Mask",
       });
       finishMaskLoadingProgress();
       return;
@@ -931,6 +931,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   useEffect(() => {
+    volumeLoaded.current = false;
     updateMaskState(createInitialMaskSessionState());
     setMaskLoadingProgress(1, "Loading image data...");
     const brushCursorHandlers: Array<{
@@ -985,7 +986,12 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       const viewport_PET = renderingEngine.getViewport(
         viewportIds[0]
       ) as Types.IVolumeViewport;
-      const dimensions = viewport_PET.getImageData(volumeIds[0]).dimensions;
+      const imageData = viewport_PET.getImageData(volumeIds[0]);
+      if (!imageData) {
+        throw new Error("Volume image data is not ready");
+      }
+
+      const dimensions = imageData.dimensions;
       PET_SAGITTAL_Num = dimensions[1];
       PET_CORONAL_Num = dimensions[0];
       setPET_AXIAL_Index(
@@ -997,13 +1003,16 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         getImageSliceDataForVolumeViewport(viewport_PET).imageIndex + 1
       );
       await initializeSegmentation();
-    }).catch(() => {
+    }).catch((error) => {
+      console.error("Failed to load image data:", error);
+      volumeLoaded.current = false;
       updateMaskState({
         ready: false,
         source: "error",
-        message: "影像数据加载失败，无法初始化Mask",
+        message: "影像数据加载失败，请检查导入序列",
       });
       finishMaskLoadingProgress();
+      setMaskBanner("影像数据加载失败，请检查导入序列");
     });
     const jumpToken = PubSub.subscribe("imgJumpByIndex", (msg, data) => {
       viewportIds.forEach((viewportId, index) => {
@@ -1088,7 +1097,25 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         viewportIds[3]
       ) as Types.IVolumeViewport;
       const fusionVolumeId = volumeIds[pflag === "1" ? 2 : 1];
-      const dimensions = viewport_PET_CT.getImageData(fusionVolumeId).dimensions;
+
+      if (!viewport_PET_CT || !fusionVolumeId) {
+        return;
+      }
+
+      const hasFusionActor = viewport_PET_CT
+        .getActors()
+        .some((actor) => actor.uid === fusionVolumeId);
+
+      if (!hasFusionActor) {
+        return;
+      }
+
+      const imageData = viewport_PET_CT.getImageData(fusionVolumeId);
+      if (!imageData) {
+        return;
+      }
+
+      const dimensions = imageData.dimensions;
       switch (MPR) {
         case "AXIAL":
           viewport_PET_CT.setOrientation(Enums.OrientationAxis.AXIAL);
@@ -1328,8 +1355,4 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 };
 
 export default ImgShow;
-
-
-
-
 

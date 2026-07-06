@@ -6,6 +6,31 @@ const path = safeWindowRequire ? safeWindowRequire("path") : null;
 const sep = path ? path.sep : "/";
 const dicomParser = require("dicom-parser");
 
+const getSlicePosition = (dataSet: any) => {
+  const imagePosition = dataSet.string("x00200032");
+  const imageOrientation = dataSet.string("x00200037");
+
+  if (!imagePosition || !imageOrientation) {
+    return null;
+  }
+
+  const position = imagePosition.split("\\").map(Number);
+  const orientation = imageOrientation.split("\\").map(Number);
+  if (position.length < 3 || orientation.length < 6) {
+    return null;
+  }
+
+  const row = orientation.slice(0, 3);
+  const col = orientation.slice(3, 6);
+  const normal = [
+    row[1] * col[2] - row[2] * col[1],
+    row[2] * col[0] - row[0] * col[2],
+    row[0] * col[1] - row[1] * col[0],
+  ];
+
+  return position[0] * normal[0] + position[1] * normal[1] + position[2] * normal[2];
+};
+
 const loadImages = (pathFolder: string, flag: string) => {
   if (!fs || !path) {
     throw new Error('Local image loading requires the Electron desktop app.');
@@ -18,28 +43,41 @@ const loadImages = (pathFolder: string, flag: string) => {
   if (!filespath.length) {
     throw new Error('No DICOM files found in folder: ' + pathFolder);
   }
-  let map = {};
-  let arr = [];
   let imageIds = [];
-  let temp_content = fs.readFileSync(pathFolder + sep + filespath[0]);
-  let temp_contentParsed = dicomParser.parseDicom(temp_content);
-  let modality = temp_contentParsed.string("x00080060");
+  const instances = [];
+
   for (let i = 0; i < filespath.length; i++) {
-    let content = fs.readFileSync(pathFolder + "/" + filespath[i]);
-    let contentParsed = dicomParser.parseDicom(content);
-    let instancenum = contentParsed.string("x00200013");
-    map[instancenum] = i;
-    arr[i] = instancenum;
+    const filePath = pathFolder + sep + filespath[i];
+    try {
+      const content = fs.readFileSync(filePath);
+      const contentParsed = dicomParser.parseDicom(content);
+      instances.push({
+        filePath,
+        dataSet: contentParsed,
+        instanceNumber: Number(contentParsed.string("x00200013")),
+        slicePosition: getSlicePosition(contentParsed),
+      });
+    } catch (error) {
+      // Ignore non-DICOM sidecar files.
+    }
   }
-  arr.sort(function (a, b) {
-    return a - b;
+
+  if (!instances.length) {
+    throw new Error('No readable DICOM files found in folder: ' + pathFolder);
+  }
+
+  instances.sort((a, b) => {
+    if (a.slicePosition !== null && b.slicePosition !== null) {
+      return a.slicePosition - b.slicePosition;
+    }
+
+    return a.instanceNumber - b.instanceNumber;
   });
-  let arrp = [];
-  for (let i = 0; i < arr.length; i++) {
-    let k = arr[i];
-    arrp[i] = "wadouri:file:///" + pathFolder + sep + filespath[map[k]];
-    imageIds[i] = arrp[i];
-  }
+
+  let temp_contentParsed = instances[0].dataSet;
+  let modality = temp_contentParsed.string("x00080060");
+  imageIds = instances.map((instance) => "wadouri:file:///" + instance.filePath);
+
   if (modality === "PT" && flag !== "PET_OUT") {
     const InstanceMetadataArray = [];
     imageIds.forEach((imageId) => {

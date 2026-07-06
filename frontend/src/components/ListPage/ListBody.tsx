@@ -67,11 +67,15 @@ const deleteRecord = (
     axios
       .post("http://localhost:4001/del", { seriesId })
       .then((result) => {
-        alert(result.data.success);
+        alert(result.data.success || "删除完成");
         getNewList(curPage, sizePerPage, searchName, dispatch, setList);
       })
       .catch((err) => {
         console.log(err);
+        const message = err.response && err.response.data && err.response.data.error
+          ? err.response.data.error
+          : "删除失败";
+        alert(message);
       });
   }
 };
@@ -101,7 +105,7 @@ const Listbody: React.FC = () => {
 
   const imgBtn = (patientInfo: patientState["patientInfo"]) => {
     const { pflag } = patientInfo;
-    if (pflag === "1" || pflag === "2") {
+    if (pflag === "1" || pflag === "2" || pflag === "6") {
       dispatch(updatePatientInfo(patientInfo));
       navigate("/ImgPage");
     } else if (pflag === "0" || pflag === "4" || pflag === "5") {

@@ -469,7 +469,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           </div>
           <div>保存Mask</div>
         </div>
-        {pflag !== "2" ? (
+        {pflag !== "2" && pflag !== "6" ? (
           <div className="buttonContainer" onClick={generateReport}>
             <div className="NewIconfont">&#9998;</div>
             <div>查看报告</div>
@@ -502,6 +502,5 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 };
 
 export default ImgShowHeader;
-
 
 

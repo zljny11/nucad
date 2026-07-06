@@ -8,3 +8,7 @@ coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local NuCAD runtime/import data
+backend/data/
+local-imports/

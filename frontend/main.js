@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, globalShortcut, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path')
 const url = require('url')
@@ -7,6 +7,19 @@ const license_module = require('./license_verify.js');
 let mainWindow = null;
 let receiveWindow = null;
 // Menu.setApplicationMenu(null)
+
+ipcMain.handle('select-dicom-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择DICOM文件夹',
+    properties: ['openDirectory'],
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
 
 const Store = require('electron-store');
 const store = new Store();
