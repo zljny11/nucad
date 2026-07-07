@@ -21,6 +21,58 @@ ipcMain.handle('select-dicom-folder', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('select-algorithm-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择算法结果文件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'NIfTI算法Mask', extensions: ['nii', 'gz'] },
+      { name: '其他算法格式', extensions: ['nrrd', 'mha', 'mhd'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  return result.filePaths;
+});
+
+ipcMain.handle('select-lesion-list-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择病灶列表文件',
+    properties: ['openFile'],
+    filters: [
+      { name: '病灶列表文件', extensions: ['xlsx', 'xls', 'csv', 'json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+ipcMain.handle('select-algorithm-lesion-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择病灶列表文件',
+    properties: ['openFile'],
+    filters: [
+      { name: '病灶列表文件', extensions: ['xlsx', 'xls', 'csv', 'json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
 const Store = require('electron-store');
 const store = new Store();
 const userDataPath = store.get('address') || app.getPath('userData');

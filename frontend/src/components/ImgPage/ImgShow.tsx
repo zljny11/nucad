@@ -43,8 +43,8 @@ import {
 // import axios from "axios";
 
 const { ViewportType } = Enums;
-const { CAMERA_MODIFIED } = Enums.Events;
-const { getImageSliceDataForVolumeViewport } = csUtils;
+const { CAMERA_MODIFIED, VOI_MODIFIED } = Enums.Events;
+const { getImageSliceDataForVolumeViewport, windowLevel } = csUtils;
 const {
   utilities,
   segmentation,
@@ -226,10 +226,9 @@ const initAndGetImageIds = async (
   pflag: string
 ): Promise<Record<string, any>[]> => {
   await initDemo();
-  if (!getRenderingEngine(renderingEngineId)) {
-    renderingEngine = new RenderingEngine(renderingEngineId);
-    elements = document.getElementsByClassName("viewport");
-  }
+  renderingEngine =
+    getRenderingEngine(renderingEngineId) || new RenderingEngine(renderingEngineId);
+  elements = document.getElementsByClassName("viewport");
 
   /* const axiosResult = await axios.post("http://localhost:4001/getPath", {
     inputPath,
@@ -416,29 +415,64 @@ const changePET_CT_Num = (
 
 interface ImgShowProps {
   volumeIds: string[];
+  enableMaskEditing?: boolean;
 }
+
+interface WindowLevelState {
+  width: number;
+  center: number;
+}
+
+const defaultWindowLevelState: WindowLevelState = {
+  width: 400,
+  center: 40,
+};
+
+const initialWindowLevels = viewportIds.reduce<Record<string, WindowLevelState>>(
+  (levels, viewportId) => {
+    levels[viewportId] = defaultWindowLevelState;
+    return levels;
+  },
+  {}
+);
+
+const formatWindowLevelValue = (value: number) => {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+
+  return Math.round(value).toString();
+};
 
 const ImgShow: React.FC<ImgShowProps> = (props) => {
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const { seriesId, pname, scanTime, pID, inputPath, outputPath, pflag } =
     patientInfo;
   const { volumeLoaded } = useContext(ImgPageContext);
-  const { volumeIds } = props;
+  const { volumeIds, enableMaskEditing = false } = props;
+  const showLoadingProgress = !enableMaskEditing;
   const [PET_AXIAL_Index, setPET_AXIAL_Index] = useState(0);
   const [PET_CORONAL_Index, setPET_CORONAL_Index] = useState(0);
   const [PET_SAGITTAL_Index, setPET_SAGITTAL_Index] = useState(0);
   const [PET_CT_Index, setPET_CT_Index] = useState(0);
   const [MPR, setMPR] = useState("AXIAL");
   const [maskBanner, setMaskBanner] = useState("");
+  const [windowLevels, setWindowLevels] =
+    useState<Record<string, WindowLevelState>>(initialWindowLevels);
   const [maskLoading, setMaskLoading] = useState<MaskLoadingState>({
-    active: true,
+    active: showLoadingProgress,
     percent: 1,
     text: "Loading image data...",
   });
+  const imgShowRef = useRef<HTMLDivElement | null>(null);
   const preMPR = useRef("AXIAL");
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
 
   const setMaskLoadingProgress = (percent: number, text: string) => {
+    if (!showLoadingProgress) {
+      return;
+    }
+
     setMaskLoading({
       active: true,
       percent,
@@ -447,6 +481,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   const finishMaskLoadingProgress = () => {
+    if (!showLoadingProgress) {
+      return;
+    }
+
     setMaskLoading((previous) => ({
       ...previous,
       active: false,
@@ -455,6 +493,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   const publishMaskState = () => {
+    if (!enableMaskEditing) {
+      return;
+    }
+
     const maskSession = maskSessionRef.current;
     const payload: MaskToolbarStatePayload = {
       ready: maskSession.ready,
@@ -473,8 +515,56 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
   const updateMaskState = (partial: Partial<MaskSessionState>) => {
     Object.assign(maskSessionRef.current, partial);
-    setMaskBanner(maskSessionRef.current.message);
+    if (enableMaskEditing) {
+      setMaskBanner(maskSessionRef.current.message);
+    }
     publishMaskState();
+  };
+
+  const setViewportWindowLevel = (
+    viewportId: string,
+    voiRange?: Types.VOIRange | null
+  ) => {
+    if (!voiRange) {
+      return;
+    }
+
+    const { windowWidth, windowCenter } = windowLevel.toWindowLevel(
+      voiRange.lower,
+      voiRange.upper
+    );
+
+    if (!Number.isFinite(windowWidth) || !Number.isFinite(windowCenter)) {
+      return;
+    }
+
+    setWindowLevels((previous) => {
+      const current = previous[viewportId];
+
+      if (
+        current &&
+        Math.round(current.width) === Math.round(windowWidth) &&
+        Math.round(current.center) === Math.round(windowCenter)
+      ) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [viewportId]: {
+          width: windowWidth,
+          center: windowCenter,
+        },
+      };
+    });
+  };
+
+  const refreshViewportWindowLevel = (viewportId: string) => {
+    const viewport = renderingEngine?.getViewport(
+      viewportId
+    ) as Types.IVolumeViewport;
+
+    setViewportWindowLevel(viewportId, viewport?.getProperties?.().voiRange);
   };
 
   const getSegmentationVolume = () =>
@@ -598,6 +688,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   const initializeSegmentation = async () => {
+    if (!enableMaskEditing) {
+      return;
+    }
+
     setMaskLoadingProgress(22, "Initializing Mask...");
     if (pflag === "2" || pflag === "6" || !volumeIds.length) {
       updateMaskState({
@@ -939,6 +1033,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       enter: EventListener;
       leave: EventListener;
     }> = [];
+    const voiModifiedHandlers: Array<{
+      element: Element;
+      handler: EventListener;
+    }> = [];
     const attachBrushCursorHandlers = () => {
       if (!elements || !elements.length || brushCursorHandlers.length) {
         return;
@@ -951,6 +1049,30 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         element.addEventListener("pointerenter", enter);
         element.addEventListener("pointerleave", leave);
         brushCursorHandlers.push({ element, enter, leave });
+      });
+    };
+    const attachVoiModifiedHandlers = () => {
+      if (!elements || !elements.length || voiModifiedHandlers.length) {
+        return;
+      }
+
+      viewportIds.forEach((viewportId, index) => {
+        const element = elements[index];
+
+        if (!element) {
+          return;
+        }
+
+        const handler = (event: Event) => {
+          const voiModifiedEvent = event as CustomEvent<{
+            range?: Types.VOIRange;
+          }>;
+
+          setViewportWindowLevel(viewportId, voiModifiedEvent.detail?.range);
+        };
+
+        element.addEventListener(VOI_MODIFIED, handler);
+        voiModifiedHandlers.push({ element, handler });
       });
     };
 
@@ -975,6 +1097,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       );
       setMaskLoadingProgress(18, "Rendering image volumes...");
       attachBrushCursorHandlers();
+      attachVoiModifiedHandlers();
+      viewportIds.forEach(refreshViewportWindowLevel);
       wheelEventListener(
         viewportIds,
         setPET_AXIAL_Index,
@@ -1002,15 +1126,21 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       setPET_CT_Index(
         getImageSliceDataForVolumeViewport(viewport_PET).imageIndex + 1
       );
-      await initializeSegmentation();
+      if (enableMaskEditing) {
+        await initializeSegmentation();
+      } else {
+        finishMaskLoadingProgress();
+      }
     }).catch((error) => {
       console.error("Failed to load image data:", error);
       volumeLoaded.current = false;
-      updateMaskState({
-        ready: false,
-        source: "error",
-        message: "影像数据加载失败，请检查导入序列",
-      });
+      if (enableMaskEditing) {
+        updateMaskState({
+          ready: false,
+          source: "error",
+          message: "影像数据加载失败，请检查导入序列",
+        });
+      }
       finishMaskLoadingProgress();
       setMaskBanner("影像数据加载失败，请检查导入序列");
     });
@@ -1084,6 +1214,12 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         element.removeEventListener("pointerenter", enter);
         element.removeEventListener("pointerleave", leave);
       });
+      voiModifiedHandlers.forEach(({ element, handler }) => {
+        element.removeEventListener(VOI_MODIFIED, handler);
+      });
+      if (enableMaskEditing) {
+        setMaskActorsVisibility(false);
+      }
       if (maskSessionRef.current.historyTimer) {
         clearTimeout(maskSessionRef.current.historyTimer);
       }
@@ -1136,6 +1272,38 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
   }, [MPR]);
 
+  useEffect(() => {
+    const resizeViewports = () => {
+      if (!renderingEngine || !volumeLoaded.current) {
+        return;
+      }
+
+      renderingEngine.resize();
+      renderingEngine.render();
+    };
+
+    const element = imgShowRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    let frameId = 0;
+    const queueResize = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(resizeViewports);
+    };
+
+    const resizeObserver = new ResizeObserver(queueResize);
+    resizeObserver.observe(element);
+    window.addEventListener("resize", queueResize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", queueResize);
+    };
+  }, [volumeLoaded]);
+
   const wheelOnChange = (
     e: React.ChangeEvent<HTMLInputElement>,
     viewportId: string
@@ -1147,10 +1315,13 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
   };
 
+  const getViewportWindowLevel = (viewportId: string) =>
+    windowLevels[viewportId] ?? defaultWindowLevelState;
+
   return (
-    <div className="ImgShow" id="content">
-      {maskBanner ? <div className="maskBanner">{maskBanner}</div> : null}
-      {maskLoading.active ? (
+    <div className="ImgShow" id="content" ref={imgShowRef}>
+      {enableMaskEditing && maskBanner ? <div className="maskBanner">{maskBanner}</div> : null}
+      {showLoadingProgress && maskLoading.active ? (
         <div className="maskLoading">
           <div className="maskLoadingText">
             <span>{maskLoading.text}</span>
@@ -1178,11 +1349,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
               </div>
               <div>
                 <span className="title">W&nbsp;:&nbsp; </span>
-                <span>400</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[0]).width
+                  )}
+                </span>
               </div>
               <div>
                 <span className="title">L&nbsp;&nbsp;&nbsp;:&nbsp; </span>
-                <span>40</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[0]).center
+                  )}
+                </span>
               </div>
             </div>
             <div className="img_viewport_pInfo">
@@ -1219,11 +1398,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
               </div>
               <div>
                 <span className="title">W&nbsp;:&nbsp; </span>
-                <span>400</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[1]).width
+                  )}
+                </span>
               </div>
               <div>
                 <span className="title">L&nbsp;&nbsp;&nbsp;:&nbsp; </span>
-                <span>40</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[1]).center
+                  )}
+                </span>
               </div>
             </div>
             <div className="img_viewport_pInfo">
@@ -1260,11 +1447,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
               </div>
               <div>
                 <span className="title">W&nbsp;:&nbsp; </span>
-                <span>400</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[2]).width
+                  )}
+                </span>
               </div>
               <div>
                 <span className="title">L&nbsp;&nbsp;&nbsp;:&nbsp; </span>
-                <span>40</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[2]).center
+                  )}
+                </span>
               </div>
             </div>
             <div className="img_viewport_pInfo">
@@ -1301,11 +1496,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
               </div>
               <div>
                 <span className="title">W&nbsp;:&nbsp; </span>
-                <span>400</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[3]).width
+                  )}
+                </span>
               </div>
               <div>
                 <span className="title">L&nbsp;&nbsp;&nbsp;:&nbsp; </span>
-                <span>40</span>
+                <span>
+                  {formatWindowLevelValue(
+                    getViewportWindowLevel(viewportIds[3]).center
+                  )}
+                </span>
               </div>
             </div>
             <div className="img_viewport_pInfo">
@@ -1355,4 +1558,3 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 };
 
 export default ImgShow;
-

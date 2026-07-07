@@ -5,6 +5,8 @@ import { getRenderingEngine } from "@cornerstonejs/core";
 import * as cornerstoneTools from "@cornerstonejs/tools";
 import {
   VolumeToolGroup,
+  NuCadZoomTool,
+  NuCadDragProbeTool,
   setUpVoiSynchronizers,
   removeVoiSynchronizers,
   setToolPassiveFun,
@@ -20,14 +22,13 @@ import {
   MASK_TOGGLE_VISIBILITY_TOPIC,
   MASK_UNDO_TOPIC,
 } from "./functions/maskEvents";
+import { LESION_EDIT_TOGGLE_TOPIC } from "./functions/lesionEditEvents";
 import logo from "../../images/logonamegrey.png";
 
 const {
   Enums: csToolsEnums,
   WindowLevelTool,
   PanTool,
-  ZoomTool,
-  DragProbeTool,
   CrosshairsTool,
   BrushTool,
 } = cornerstoneTools;
@@ -57,14 +58,88 @@ const initialMaskState: MaskToolbarState = {
   mode: "none",
 };
 
+let probeCursorHidden = false;
+let probeCursorHideTimer: ReturnType<typeof window.setInterval> | null = null;
+const hiddenCursor =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3C/svg%3E\") 0 0, none";
+
+const probeCursorHiddenSelectors = [
+  "html",
+  "body",
+  "#root",
+  "#content",
+  "#viewportGrid",
+  "#viewportGrid *",
+];
+
+const applyProbeCursorHidden = () => {
+  if (!probeCursorHidden) {
+    return;
+  }
+
+  document.querySelectorAll<HTMLElement>(probeCursorHiddenSelectors.join(", "))
+    .forEach((element) => {
+      element.style.setProperty("cursor", hiddenCursor, "important");
+    });
+};
+
+const resetProbeCursorHidden = () => {
+  document.querySelectorAll<HTMLElement>(probeCursorHiddenSelectors.join(", "))
+    .forEach((element) => {
+      element.style.removeProperty("cursor");
+    });
+};
+
+const setProbeCursorHidden = (hidden: boolean) => {
+  probeCursorHidden = hidden;
+  const viewportGrid = document.getElementById("viewportGrid");
+  viewportGrid?.classList.toggle("probeCursorHidden", hidden);
+
+  const { hideElementCursor, resetElementCursor } = (cornerstoneTools as any)
+    .cursors.elementCursor;
+
+  document
+    .querySelectorAll<HTMLElement>("#viewportGrid .viewport")
+    .forEach((element) => {
+      if (hidden) {
+        hideElementCursor(element);
+      } else {
+        resetElementCursor(element);
+      }
+    });
+
+  if (hidden) {
+    applyProbeCursorHidden();
+    if (!probeCursorHideTimer) {
+      probeCursorHideTimer = window.setInterval(applyProbeCursorHidden, 100);
+    }
+    ["mousemove", "pointermove", "mouseenter", "mouseover"].forEach(
+      (eventName) => {
+        document.addEventListener(eventName, applyProbeCursorHidden, true);
+      }
+    );
+  } else if (probeCursorHideTimer) {
+    window.clearInterval(probeCursorHideTimer);
+    probeCursorHideTimer = null;
+    ["mousemove", "pointermove", "mouseenter", "mouseover"].forEach(
+      (eventName) => {
+        document.removeEventListener(eventName, applyProbeCursorHidden, true);
+      }
+    );
+    resetProbeCursorHidden();
+  }
+};
+
 interface ImgShowHeaderProps {
   pflag: string;
+  mode?: "viewer" | "editor";
 }
 
 const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
   const navigate = useNavigate();
   const { volumeLoaded } = useContext(ImgPageContext);
-  const { pflag } = props;
+  const { pflag, mode = "viewer" } = props;
+  const isEditor = mode === "editor";
   const [curTool, setCurTool] = useState("");
   const [voiSync, setVoiSync] = useState(false);
   const [crosshairsActive, setCrosshairsActive] = useState(false);
@@ -90,10 +165,21 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
   const goBackListPage = () => {
     if (volumeLoaded.current) {
+      setProbeCursorHidden(false);
       removeVoiSynchronizers();
       setToolPassiveFun(VolumeToolGroup);
       disableCrosshairs();
-      navigate("/ListPage");
+      navigate(isEditor ? "/ImgPage" : "/ListPage");
+    }
+  };
+
+  const showLesionEditList = () => {
+    if (volumeLoaded.current) {
+      setProbeCursorHidden(false);
+      removeVoiSynchronizers();
+      setToolPassiveFun(VolumeToolGroup);
+      disableCrosshairs();
+      PubSub.publish(LESION_EDIT_TOGGLE_TOPIC);
     }
   };
 
@@ -109,6 +195,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       }
       setToolPassiveFun(VolumeToolGroup);
       PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+      setProbeCursorHidden(false);
       setCurTool("");
       return;
     }
@@ -117,9 +204,10 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
     PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+    setProbeCursorHidden(toolName === "NuCadDragProbeTool");
     switch (toolName) {
-      case "ZoomTool":
-        VolumeToolGroup.setToolActive(ZoomTool.toolName, {
+      case "NuCadZoomTool":
+        VolumeToolGroup.setToolActive(NuCadZoomTool.toolName, {
           bindings: [
             {
               mouseButton: MouseBindings.Primary,
@@ -136,8 +224,8 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           ],
         });
         break;
-      case "DragProbeTool":
-        VolumeToolGroup.setToolActive(DragProbeTool.toolName, {
+      case "NuCadDragProbeTool":
+        VolumeToolGroup.setToolActive(NuCadDragProbeTool.toolName, {
           bindings: [
             {
               mouseButton: MouseBindings.Primary,
@@ -176,6 +264,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     }
     disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
+    setProbeCursorHidden(false);
     PubSub.publishSync(MASK_SET_MODE_TOPIC, mode);
     setCurTool(BrushTool.toolName);
   };
@@ -196,6 +285,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     } else {
       disableCrosshairs();
       setToolPassiveFun(VolumeToolGroup);
+      setProbeCursorHidden(false);
       PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
       VolumeToolGroup.setToolActive(WindowLevelTool.toolName, {
         bindings: [
@@ -215,15 +305,24 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       return;
     }
     if (crosshairsActive) {
-      VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
+      disableCrosshairs();
+      setCurTool("");
     } else {
+      if (voiSync) {
+        removeVoiSynchronizers();
+        setVoiSync(false);
+      }
+      setProbeCursorHidden(false);
+      setToolPassiveFun(VolumeToolGroup);
+      PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
       VolumeToolGroup.setToolActive(CrosshairsTool.toolName, {
         bindings: [
           {
-            mouseButton: MouseBindings.Secondary,
+            mouseButton: MouseBindings.Primary,
           },
         ],
       });
+      setCurTool(CrosshairsTool.toolName);
     }
     setCrosshairsActive(!crosshairsActive);
   };
@@ -260,16 +359,16 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       <div className="ImgShowMenu">
         <div className="buttonContainer" onClick={goBackListPage}>
           <div className="NewIconfont">&#xe8a4;</div>
-          <div>返回</div>
+          <div>{isEditor ? "返回影像" : "返回"}</div>
         </div>
 
         <div
           className="buttonContainer"
-          onClick={() => handleLeftClicked("ZoomTool")}
+          onClick={() => handleLeftClicked("NuCadZoomTool")}
         >
           <div
             className={
-              curTool === "ZoomTool" ? "chosenIconfont" : "NewIconfont"
+              curTool === "NuCadZoomTool" ? "chosenIconfont" : "NewIconfont"
             }
           >
             &#xec13;
@@ -291,11 +390,13 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
         <div
           className="buttonContainer"
-          onClick={() => handleLeftClicked("DragProbeTool")}
+          onClick={() => handleLeftClicked("NuCadDragProbeTool")}
         >
           <div
             className={
-              curTool === "DragProbeTool" ? "chosenIconfont" : "NewIconfont"
+              curTool === "NuCadDragProbeTool"
+                ? "chosenIconfont"
+                : "NewIconfont"
             }
           >
             &#xe6b0;
@@ -349,127 +450,136 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           <div className="NewIconfont">&#xe6ad;</div>
           <div>重置影像</div>
         </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => PubSub.publish(MASK_TOGGLE_VISIBILITY_TOPIC)}
-        >
-          <div className={maskState.visible ? "chosenIconfont" : "NewIconfont"}>
-            &#xe8da;
-          </div>
-          <div>{maskState.visible ? "隐藏Mask" : "显示Mask"}</div>
-        </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => setMaskMode("brush")}
-        >
-          <div
-            className={
-              maskState.mode === "brush" ? "chosenIconfont" : "NewIconfont"
-            }
-          >
-            &#9998;
-          </div>
-          <div>画刷</div>
-        </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => setMaskMode("erase")}
-        >
-          <div
-            className={
-              maskState.mode === "erase" ? "chosenIconfont" : "NewIconfont"
-            }
-          >
-            <svg
-              className="eraserIcon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
+        {isEditor ? (
+          <>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => PubSub.publish(MASK_TOGGLE_VISIBILITY_TOPIC)}
             >
-              <path
-                d="M16.8 3.7 21 7.9c.8.8.8 2 0 2.8l-8.9 8.9c-.4.4-.9.6-1.4.6H4.4c-.5 0-.8-.6-.5-1l3-4.8L14 3.7c.8-.8 2-.8 2.8 0Z"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-              />
-              <path
-                d="M7.7 14.2 12.5 19M12.5 8l4.8 4.8"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-              />
-            </svg>
-          </div>
-          <div>橡皮</div>
-        </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => changeBrushSize(-2)}
-        >
-          <div className="NewIconfont">-</div>
-          <div>半径-{2}</div>
-        </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => changeBrushSize(2)}
-        >
-          <div className="NewIconfont">+</div>
-          <div>半径+{2}</div>
-        </div>
-        <div
-          className={maskState.canUndo ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => maskState.canUndo && PubSub.publish(MASK_UNDO_TOPIC)}
-        >
-          <div className="NewIconfont">
-            &#xe8a4;
-          </div>
-          <div>撤销</div>
-        </div>
-        <div
-          className={maskState.canRedo ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => maskState.canRedo && PubSub.publish(MASK_REDO_TOPIC)}
-        >
-          <div className="NewIconfont">
-            <svg
-              className="redoIcon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
+              <div className={maskState.visible ? "chosenIconfont" : "NewIconfont"}>
+                &#xe8da;
+              </div>
+              <div>{maskState.visible ? "隐藏Mask" : "显示Mask"}</div>
+            </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => setMaskMode("brush")}
             >
-              <path
-                d="M17.8 8.2A7 7 0 1 0 19 12"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-              />
-              <path
-                d="M17.8 3.8v4.4h4.4"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-              />
-            </svg>
+              <div
+                className={
+                  maskState.mode === "brush" ? "chosenIconfont" : "NewIconfont"
+                }
+              >
+                &#9998;
+              </div>
+              <div>画刷</div>
+            </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => setMaskMode("erase")}
+            >
+              <div
+                className={
+                  maskState.mode === "erase" ? "chosenIconfont" : "NewIconfont"
+                }
+              >
+                <svg
+                  className="eraserIcon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M16.8 3.7 21 7.9c.8.8.8 2 0 2.8l-8.9 8.9c-.4.4-.9.6-1.4.6H4.4c-.5 0-.8-.6-.5-1l3-4.8L14 3.7c.8-.8 2-.8 2.8 0Z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.8"
+                  />
+                  <path
+                    d="M7.7 14.2 12.5 19M12.5 8l4.8 4.8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.8"
+                  />
+                </svg>
+              </div>
+              <div>橡皮</div>
+            </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => changeBrushSize(-2)}
+            >
+              <div className="NewIconfont">-</div>
+              <div>半径-{2}</div>
+            </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => changeBrushSize(2)}
+            >
+              <div className="NewIconfont">+</div>
+              <div>半径+{2}</div>
+            </div>
+            <div
+              className={maskState.canUndo ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => maskState.canUndo && PubSub.publish(MASK_UNDO_TOPIC)}
+            >
+              <div className="NewIconfont">
+                &#xe8a4;
+              </div>
+              <div>撤销</div>
+            </div>
+            <div
+              className={maskState.canRedo ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => maskState.canRedo && PubSub.publish(MASK_REDO_TOPIC)}
+            >
+              <div className="NewIconfont">
+                <svg
+                  className="redoIcon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M17.8 8.2A7 7 0 1 0 19 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                  />
+                  <path
+                    d="M17.8 3.8v4.4h4.4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                  />
+                </svg>
+              </div>
+              <div>重做</div>
+            </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => maskState.ready && PubSub.publish(MASK_SAVE_TOPIC)}
+            >
+              <div className={maskState.dirty ? "chosenIconfont" : "NewIconfont"}>
+                &#xe6ad;
+              </div>
+              <div>保存Mask</div>
+            </div>
+          </>
+        ) : (
+          <div className="buttonContainer" onClick={showLesionEditList}>
+            <div className="NewIconfont">&#9998;</div>
+            <div>病灶编辑</div>
           </div>
-          <div>重做</div>
-        </div>
-        <div
-          className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-          onClick={() => maskState.ready && PubSub.publish(MASK_SAVE_TOPIC)}
-        >
-          <div className={maskState.dirty ? "chosenIconfont" : "NewIconfont"}>
-            &#xe6ad;
-          </div>
-          <div>保存Mask</div>
-        </div>
-        {pflag !== "2" && pflag !== "6" ? (
+        )}
+        {!isEditor && pflag !== "2" && pflag !== "6" ? (
           <div className="buttonContainer" onClick={generateReport}>
             <div className="NewIconfont">&#9998;</div>
             <div>查看报告</div>
@@ -477,7 +587,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         ) : null}
       </div>
 
-      <div className="maskStatusFloating">
+      {isEditor ? <div className="maskStatusFloating">
         NuCAD
         <div className="maskStatus">
           <div>
@@ -496,11 +606,9 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           </div>
           <div>{maskState.message}</div>
         </div>
-      </div>
+      </div> : null}
     </div>
   );
 };
 
 export default ImgShowHeader;
-
-

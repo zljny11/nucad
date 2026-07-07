@@ -15,6 +15,11 @@ const xlsx = safeWindowRequire ? safeWindowRequire("node-xlsx") : null;
 
 const CheckboxGroup = Checkbox.Group;
 
+const getAreaText = (area: string) => {
+  const translatedArea = translateFocalAreas(area);
+  return translatedArea === "未识别" ? area : translatedArea;
+};
+
 const LesionTable: React.FC = () => {
   const dispatch = useAppDispatch();
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
@@ -118,7 +123,7 @@ const LesionTable: React.FC = () => {
             <span>{parseFloat(data[5]).toFixed(2)}ml</span>
             <span>{parseFloat(data[6]).toFixed(2)}</span>
             <span>{parseFloat(data[7]).toFixed(2)}</span>
-            <span>{translateFocalAreas(data[15])}</span>
+            <span>{getAreaText(data[15])}</span>
           </div>
         );
       })}

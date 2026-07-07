@@ -5,6 +5,7 @@ import Home from './components/Home'
 import ListPage from './components/ListPage'
 import LicensePage from './components/LicensePage'
 import ImgPage from './components/ImgPage'
+import LesionEditPage from './components/ImgPage/LesionEditPage'
 import './Newincon/iconfont.css'
 import './App.css'
 
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/ListPage" element={<ListPage />} />
           <Route path="/LicensePage" element={<LicensePage />} />
           <Route path="/ImgPage" element={<ImgPage />} />
+          <Route path="/LesionEditPage" element={<LesionEditPage />} />
         </Routes>
       </div>
     </Provider>
