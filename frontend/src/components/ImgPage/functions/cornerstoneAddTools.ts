@@ -229,6 +229,10 @@ class NuCadCrosshairsTool extends CrosshairsTool {
     };
 
     this.computeToolCenter = (viewportsInfo: any[]): void => {
+      if (!originalComputeToolCenter || viewportsInfo.length < 2) {
+        return;
+      }
+
       originalComputeToolCenter(viewportsInfo);
 
       if (viewportsInfo.length <= 3) {

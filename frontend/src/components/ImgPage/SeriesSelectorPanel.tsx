@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useAppSelector } from "../../redux/hooks";
 import { safeWindowRequire } from "../../utils/electron";
 
 const fs = safeWindowRequire ? safeWindowRequire("fs") : null;
 const path = safeWindowRequire ? safeWindowRequire("path") : null;
+const dicomParser = safeWindowRequire ? safeWindowRequire("dicom-parser") : null;
 
 type Modality = "PET" | "CT";
 
@@ -15,6 +16,18 @@ interface SeriesOption {
   petCount: number;
   ctCount: number;
   active: boolean;
+}
+
+export interface SelectedSeries {
+  id: string;
+  label: string;
+  petPath: string;
+  ctPath: string;
+}
+
+interface SeriesSelectorPanelProps {
+  selectedSeriesId: string;
+  onSeriesChange: (series: SelectedSeries) => void;
 }
 
 const getBaseName = (filePath: string) =>
@@ -43,7 +56,52 @@ const getDicomCount = (dirPath: string) => {
   }
 };
 
+const getImportedBatchPrefix = (dirName: string) => {
+  const match = dirName.match(/^(.+)_\d+_(PT|CT)$/i);
+  return match ? match[1] : "";
+};
+
+const isSameImportedBatchSeries = (dirName: string, batchPrefix: string) => {
+  if (!batchPrefix) {
+    return true;
+  }
+
+  return new RegExp(`^${batchPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_\\d+_(PT|CT)$`, "i").test(dirName);
+};
+
+const getDicomSeriesDescription = (dirPath: string) => {
+  if (!fs || !path || !dicomParser || !dirPath || !fs.existsSync(dirPath)) {
+    return "";
+  }
+
+  try {
+    const fileName = fs
+      .readdirSync(dirPath)
+      .find((name: string) => {
+        const lowerName = name.toLowerCase();
+        return lowerName.endsWith(".dcm") && !lowerName.startsWith("._");
+      });
+
+    if (!fileName) {
+      return "";
+    }
+
+    const dataSet = dicomParser.parseDicom(
+      fs.readFileSync(path.join(dirPath, fileName))
+    );
+    return (dataSet.string("x0008103e") || "").trim();
+  } catch (error) {
+    return "";
+  }
+};
+
 const getSeriesLabel = (dirName: string) => {
+  const importedPairMatch = dirName.match(/(.+)_(PT|CT)$/i);
+
+  if (importedPairMatch) {
+    return importedPairMatch[1];
+  }
+
   if (/brain/i.test(dirName)) {
     return "Brain";
   }
@@ -55,15 +113,25 @@ const getSeriesLabel = (dirName: string) => {
   return dirName.replace(/^(pet|ct)[_\-\s]*/i, "") || dirName;
 };
 
+const getDisplayLabel = (dirPath: string, fallback: string) => {
+  const dicomDescription = getDicomSeriesDescription(dirPath);
+
+  if (dicomDescription) {
+    return getSeriesLabel(dicomDescription);
+  }
+
+  return fallback;
+};
+
 const getPairKey = (dirName: string) =>
   getSeriesLabel(dirName).toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
 const getModality = (dirName: string): Modality | null => {
-  if (/^pet|[_\-\s]pet/i.test(dirName)) {
+  if (/^pet|[_\-\s]pet|_pt$/i.test(dirName)) {
     return "PET";
   }
 
-  if (/^ct|[_\-\s]ct/i.test(dirName)) {
+  if (/^ct|[_\-\s]ct|_ct$/i.test(dirName)) {
     return "CT";
   }
 
@@ -108,6 +176,7 @@ const discoverSeriesOptions = (inputPath: string, outputPath: string) => {
   }
 
   const configPaths = readConfigPaths(outputPath);
+  const importedBatchPrefix = getImportedBatchPrefix(getBaseName(inputPath));
   const activePetPath = normalizePath(configPaths.petPath || inputPath);
   const activeCtPath = normalizePath(configPaths.ctPath);
   const groups: Record<
@@ -121,6 +190,7 @@ const discoverSeriesOptions = (inputPath: string, outputPath: string) => {
 
   fs.readdirSync(parentDir, { withFileTypes: true })
     .filter((entry: any) => entry.isDirectory())
+    .filter((entry: any) => isSameImportedBatchSeries(entry.name, importedBatchPrefix))
     .forEach((entry: any) => {
       const modality = getModality(entry.name);
 
@@ -145,6 +215,7 @@ const discoverSeriesOptions = (inputPath: string, outputPath: string) => {
 
   return Object.entries(groups)
     .map(([key, group]) => {
+      const displayLabel = getDisplayLabel(group.petPath || group.ctPath, group.label);
       const normalizedPetPath = normalizePath(group.petPath);
       const normalizedCtPath = normalizePath(group.ctPath);
       const active =
@@ -153,7 +224,7 @@ const discoverSeriesOptions = (inputPath: string, outputPath: string) => {
 
       return {
         id: key,
-        label: group.label,
+        label: displayLabel,
         petPath: group.petPath,
         ctPath: group.ctPath,
         petCount: getDicomCount(group.petPath),
@@ -170,7 +241,8 @@ const discoverSeriesOptions = (inputPath: string, outputPath: string) => {
     });
 };
 
-const SeriesSelectorPanel: React.FC = () => {
+const SeriesSelectorPanel: React.FC<SeriesSelectorPanelProps> = (props) => {
+  const { selectedSeriesId, onSeriesChange } = props;
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const { inputPath, outputPath } = patientInfo;
   const [collapsed, setCollapsed] = useState(false);
@@ -180,13 +252,13 @@ const SeriesSelectorPanel: React.FC = () => {
   );
   const defaultSelectedId =
     seriesOptions.find((series) => series.active)?.id || seriesOptions[0]?.id || "";
-  const [selectedId, setSelectedId] = useState(defaultSelectedId);
-
-  useEffect(() => {
-    setSelectedId(defaultSelectedId);
-  }, [defaultSelectedId]);
+  const selectedId = selectedSeriesId || defaultSelectedId;
 
   const selectedSeries = seriesOptions.find((series) => series.id === selectedId);
+
+  const selectSeries = (series: SeriesOption) => {
+    onSeriesChange(series);
+  };
 
   return (
     <div
@@ -218,7 +290,7 @@ const SeriesSelectorPanel: React.FC = () => {
                   ? "seriesOption selected"
                   : "seriesOption"
               }
-              onClick={() => setSelectedId(series.id)}
+              onClick={() => selectSeries(series)}
             >
               <span className="seriesOptionName">
                 {series.label}

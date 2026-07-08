@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PubSub from "pubsub-js";
 import { useAppSelector } from "../../redux/hooks";
 import ImgPageContext from "./functions/ImgPageContext";
@@ -11,11 +11,12 @@ import ImgShowHeader from "./ImgShowHeader";
 import ImgShow from "./ImgShow";
 import Report from "./Report";
 import EditableLesionPanel from "./EditableLesionPanel";
-import SeriesSelectorPanel from "./SeriesSelectorPanel";
+import SeriesSelectorPanel, { SelectedSeries } from "./SeriesSelectorPanel";
 import {
   LESION_EDIT_CLOSE_TOPIC,
   LESION_EDIT_TOGGLE_TOPIC,
 } from "./functions/lesionEditEvents";
+import { SERIES_CHANGE_TOPIC } from "./functions/seriesEvents";
 import "./index.less";
 
 const ImgPage: React.FC = () => {
@@ -24,17 +25,29 @@ const ImgPage: React.FC = () => {
   const selectedLesions = useRef<string[]>([]);
   const volumeLoaded = useRef<boolean>(false);
   const [lesionEditPanelVisible, setLesionEditPanelVisible] = useState(false);
+  const [selectedSeries, setSelectedSeries] = useState<SelectedSeries | null>(null);
 
-  let volumeIds = null;
-  if (pflag === "2" || pflag === "6") {
-    volumeIds = [petInVolumeId + seriesId, ctVolumeId + seriesId];
-  } else {
-    volumeIds = [
-      petInVolumeId + seriesId,
-      petOutVolumeId + seriesId,
-      ctVolumeId + seriesId,
+  const handleSeriesChange = useCallback((series: SelectedSeries) => {
+    setSelectedSeries(series);
+    PubSub.publish(SERIES_CHANGE_TOPIC, series);
+  }, []);
+
+  const volumeIds = useMemo(() => {
+    const selectedSeriesSuffix = selectedSeries
+      ? `:${selectedSeries.id}`
+      : "";
+    const volumeSeriesId = `${seriesId}${selectedSeriesSuffix}`;
+
+    if (selectedSeries || pflag === "2" || pflag === "6") {
+      return [petInVolumeId + volumeSeriesId, ctVolumeId + volumeSeriesId];
+    }
+
+    return [
+      petInVolumeId + volumeSeriesId,
+      petOutVolumeId + volumeSeriesId,
+      ctVolumeId + volumeSeriesId,
     ];
-  }
+  }, [pflag, selectedSeries, seriesId]);
 
   useEffect(() => {
     const token = PubSub.subscribe(LESION_EDIT_TOGGLE_TOPIC, () => {
@@ -61,8 +74,11 @@ const ImgPage: React.FC = () => {
               : "imgShowBody withSeriesSelector"
           }
         >
-          <SeriesSelectorPanel />
-          <ImgShow volumeIds={volumeIds} />
+          <SeriesSelectorPanel
+            selectedSeriesId={selectedSeries?.id || ""}
+            onSeriesChange={handleSeriesChange}
+          />
+          <ImgShow volumeIds={volumeIds} selectedSeries={selectedSeries} />
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>
         <Report />

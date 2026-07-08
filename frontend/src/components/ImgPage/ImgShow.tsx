@@ -47,6 +47,7 @@ import {
   saveSegmentation,
   SegmentationSavePayload,
 } from "./functions/segmentationApi";
+import type { SelectedSeries } from "./SeriesSelectorPanel";
 // import axios from "axios";
 
 const { ViewportType } = Enums;
@@ -224,9 +225,11 @@ const wheelEventListener = (
   setPET_SAGITTAL_Index: React.Dispatch<React.SetStateAction<number>>,
   setPET_CT_Index: React.Dispatch<React.SetStateAction<number>>
 ) => {
+  const handlers: Array<{ element: Element; handler: EventListener }> = [];
+
   Object.values(elements).forEach((element, index) => {
     // 监听鼠标滚轮滚动
-    element.addEventListener(CAMERA_MODIFIED, () => {
+    const handler = () => {
       const viewport = renderingEngine.getViewport(
         viewportIds[index]
       ) as Types.IVolumeViewport;
@@ -250,8 +253,13 @@ const wheelEventListener = (
             break;
         }
       }
-    });
+    };
+
+    element.addEventListener(CAMERA_MODIFIED, handler);
+    handlers.push({ element, handler });
   });
+
+  return handlers;
 };
 
 const initAndGetImageIds = async (
@@ -259,7 +267,8 @@ const initAndGetImageIds = async (
   inputPath: string,
   outputPath: string,
   volumeIds: string[],
-  pflag: string
+  pflag: string,
+  selectedSeries?: SelectedSeries | null
 ): Promise<Record<string, any>[]> => {
   await initDemo();
   renderingEngine =
@@ -272,13 +281,19 @@ const initAndGetImageIds = async (
     outputPath,
   });
   const path = axiosResult.data; */
-  const path = [
-    inputPath.slice(0, inputPath.length - 2) + "CT",
-    inputPath,
-    outputPath + "/out/out",
-  ];
+  const path = selectedSeries
+    ? [
+        selectedSeries.ctPath,
+        selectedSeries.petPath,
+        "",
+      ]
+    : [
+        inputPath.slice(0, inputPath.length - 2) + "CT",
+        inputPath,
+        outputPath + "/out/out",
+      ];
   let imageIds: string[][] = [];
-  if (pflag === "2" || pflag === "6") {
+  if (selectedSeries || pflag === "2" || pflag === "6") {
     const imageIds_PET_IN = loadImages(path[1], "PET_IN");
     const imageIds_CT = loadImages(path[0], "CT");
     imageIds = [imageIds_PET_IN, imageIds_CT];
@@ -323,7 +338,8 @@ const createViewportAndRender = async (
   viewportIds: string[],
   volumeIds: string[],
   volumes: Record<string, any>[],
-  pflag: string
+  pflag: string,
+  selectedSeries?: SelectedSeries | null
 ) => {
   if (!elements || elements.length < 4) {
     throw new Error("Viewport DOM elements are not ready");
@@ -366,8 +382,9 @@ const createViewportAndRender = async (
   renderingEngine.setViewports(viewportInput);
 
   volumes.forEach((volume) => volume.load());
+  const ctVolumeIndex = !selectedSeries && pflag === "1" ? 2 : 1;
 
-  pflag === "1"
+  !selectedSeries && pflag === "1"
     ? await setVolumesForViewports(
         renderingEngine,
         [
@@ -395,7 +412,7 @@ const createViewportAndRender = async (
     renderingEngine,
     [
       {
-        volumeId: volumeIds[pflag === "1" ? 2 : 1],
+        volumeId: volumeIds[ctVolumeIndex],
         callback: setCtTransferFunctionForVolumeActor,
       },
       {
@@ -453,6 +470,7 @@ const changePET_CT_Num = (
 interface ImgShowProps {
   volumeIds: string[];
   enableMaskEditing?: boolean;
+  selectedSeries?: SelectedSeries | null;
 }
 
 interface WindowLevelState {
@@ -487,7 +505,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     patientInfo;
   const effectiveOutputPath = getEffectiveOutputPath(outputPath, inputPath);
   const { volumeLoaded } = useContext(ImgPageContext);
-  const { volumeIds, enableMaskEditing = false } = props;
+  const { volumeIds, enableMaskEditing = false, selectedSeries = null } = props;
+  const ctVolumeIndex = !selectedSeries && pflag === "1" ? 2 : 1;
   const showLoadingProgress = !enableMaskEditing;
   const [PET_AXIAL_Index, setPET_AXIAL_Index] = useState(0);
   const [PET_CORONAL_Index, setPET_CORONAL_Index] = useState(0);
@@ -504,6 +523,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   });
   const imgShowRef = useRef<HTMLDivElement | null>(null);
   const preMPR = useRef("AXIAL");
+  const loadTokenRef = useRef(0);
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
 
   const setMaskLoadingProgress = (percent: number, text: string) => {
@@ -1184,6 +1204,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   };
 
   useEffect(() => {
+    const loadToken = loadTokenRef.current + 1;
+    loadTokenRef.current = loadToken;
     volumeLoaded.current = false;
     updateMaskState(createInitialMaskSessionState());
     setMaskLoadingProgress(1, "Loading image data...");
@@ -1193,6 +1215,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       leave: EventListener;
     }> = [];
     const voiModifiedHandlers: Array<{
+      element: Element;
+      handler: EventListener;
+    }> = [];
+    let cameraModifiedHandlers: Array<{
       element: Element;
       handler: EventListener;
     }> = [];
@@ -1240,11 +1266,20 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       inputPath,
       effectiveOutputPath,
       volumeIds,
-      pflag
+      pflag,
+      selectedSeries
     );
     volumes.then(async (value) => {
+      if (loadToken !== loadTokenRef.current) {
+        return;
+      }
+
       setMaskLoadingProgress(8, "Preparing viewports...");
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      if (loadToken !== loadTokenRef.current) {
+        return;
+      }
+
       await createViewportAndRender(
         elements,
         renderingEngineId,
@@ -1252,13 +1287,18 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         viewportIds,
         volumeIds,
         value,
-        pflag
+        pflag,
+        selectedSeries
       );
+      if (loadToken !== loadTokenRef.current) {
+        return;
+      }
+
       setMaskLoadingProgress(18, "Rendering image volumes...");
       attachBrushCursorHandlers();
       attachVoiModifiedHandlers();
       viewportIds.forEach(refreshViewportWindowLevel);
-      wheelEventListener(
+      cameraModifiedHandlers = wheelEventListener(
         viewportIds,
         setPET_AXIAL_Index,
         setPET_CORONAL_Index,
@@ -1291,6 +1331,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         finishMaskLoadingProgress();
       }
     }).catch((error) => {
+      if (loadToken !== loadTokenRef.current) {
+        return;
+      }
+
       console.error("Failed to load image data:", error);
       volumeLoaded.current = false;
       if (enableMaskEditing) {
@@ -1364,6 +1408,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     );
 
     return () => {
+      if (loadToken === loadTokenRef.current) {
+        loadTokenRef.current += 1;
+      }
+
       eventTarget.removeEventListener(
         CsToolsEvents.SEGMENTATION_DATA_MODIFIED,
         segmentationModifiedHandler
@@ -1384,6 +1432,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       voiModifiedHandlers.forEach(({ element, handler }) => {
         element.removeEventListener(VOI_MODIFIED, handler);
       });
+      cameraModifiedHandlers.forEach(({ element, handler }) => {
+        element.removeEventListener(CAMERA_MODIFIED, handler);
+      });
       if (enableMaskEditing) {
         setMaskActorsVisibility(false);
       }
@@ -1391,7 +1442,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         clearTimeout(maskSessionRef.current.historyTimer);
       }
     };
-  }, []);
+  }, [effectiveOutputPath, enableMaskEditing, inputPath, pflag, selectedSeries, volumeIds]);
 
   useEffect(() => {
     if (renderingEngine && volumeLoaded.current) {
@@ -1399,7 +1450,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       const viewport_PET_CT = renderingEngine.getViewport(
         viewportIds[3]
       ) as Types.IVolumeViewport;
-      const fusionVolumeId = volumeIds[pflag === "1" ? 2 : 1];
+      const fusionVolumeId = volumeIds[ctVolumeIndex];
 
       if (!viewport_PET_CT || !fusionVolumeId) {
         return;
@@ -1437,7 +1488,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       viewport_PET_CT.render();
       changePET_CT_Num(dimensions, MPR, setPET_CT_Index);
     }
-  }, [MPR]);
+  }, [MPR, ctVolumeIndex, volumeIds]);
 
   useEffect(() => {
     const resizeViewports = () => {

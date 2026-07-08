@@ -26,6 +26,7 @@ import {
   MASK_UNDO_TOPIC,
 } from "./functions/maskEvents";
 import { LESION_EDIT_TOGGLE_TOPIC } from "./functions/lesionEditEvents";
+import { SERIES_CHANGE_TOPIC } from "./functions/seriesEvents";
 import logo from "../../images/logonamegrey.png";
 
 const {
@@ -157,9 +158,15 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         ...data,
       }));
     });
+    const seriesChangeToken = PubSub.subscribe(SERIES_CHANGE_TOPIC, () => {
+      VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
+      setCrosshairsActive(false);
+      setCurTool("");
+    });
 
     return () => {
       PubSub.unsubscribe(token);
+      PubSub.unsubscribe(seriesChangeToken);
     };
   }, []);
 
