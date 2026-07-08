@@ -43,6 +43,7 @@ import {
   MASK_STATE_TOPIC,
   MASK_TOGGLE_VISIBILITY_TOPIC,
   MASK_UNDO_TOPIC,
+  MASK_VISIBLE_SEGMENTS_TOPIC,
 } from "./functions/maskEvents";
 import {
   exportSegmentation,
@@ -492,7 +493,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const { seriesId, pname, scanTime, pID, inputPath, outputPath, pflag } =
     patientInfo;
   const effectiveOutputPath = getEffectiveOutputPath(outputPath, inputPath);
-  const { volumeLoaded } = useContext(ImgPageContext);
+  const { selectedLesions, volumeLoaded } = useContext(ImgPageContext);
   const { volumeIds, enableMaskEditing = false, selectedSeries = null } = props;
   const ctVolumeIndex = !selectedSeries && pflag === "1" ? 2 : 1;
   const showLoadingProgress = !enableMaskEditing;
@@ -703,6 +704,67 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const getSegmentationVolume = () =>
     cache.getVolume(maskSessionRef.current.segmentationVolumeId);
 
+  const getVisibleSegmentIndices = () => {
+    const segmentationVolume = getSegmentationVolume();
+
+    if (!segmentationVolume) {
+      return [];
+    }
+
+    const scalarData = segmentationVolume.getScalarData() as Uint8Array;
+    return Array.from(
+      scalarData.reduce<Set<number>>((segmentIndices, value) => {
+        if (value > 0) {
+          segmentIndices.add(value);
+        }
+        return segmentIndices;
+      }, new Set<number>())
+    );
+  };
+
+  const applyVisibleLesionSegments = (
+    nextVisibleLesions?: string[],
+    options: { preferAllWhenEmpty?: boolean } = {}
+  ) => {
+    const maskSession = maskSessionRef.current;
+
+    if (!maskSession.ready || !maskSession.segmentationRepresentationUID) {
+      return;
+    }
+
+    const segmentIndices = getVisibleSegmentIndices();
+    if (!segmentIndices.length) {
+      return;
+    }
+
+    const visibleSegments = (
+      nextVisibleLesions && nextVisibleLesions.length
+        ? nextVisibleLesions
+        : selectedLesions.current
+    )
+      .map((segmentIndex) => Number(segmentIndex))
+      .filter((segmentIndex) => Number.isFinite(segmentIndex) && segmentIndex > 0);
+    const visibleSegmentSet = new Set(visibleSegments);
+    const hasVisibleSegmentMatch = segmentIndices.some((segmentIndex) =>
+      visibleSegmentSet.has(segmentIndex)
+    );
+    const shouldShowAllSegments =
+      options.preferAllWhenEmpty === true &&
+      (!visibleSegmentSet.size || !hasVisibleSegmentMatch);
+
+    segmentIndices.forEach((segmentIndex) => {
+      segmentation.config.visibility.setSegmentVisibility(
+        VolumeToolGroup.id,
+        maskSession.segmentationRepresentationUID,
+        segmentIndex,
+        shouldShowAllSegments || visibleSegmentSet.has(segmentIndex)
+      );
+    });
+
+    renderingEngine?.render();
+    window.setTimeout(() => setMaskActorsVisibility(maskSession.visible), 0);
+  };
+
   const setMaskActorsVisibility = (visible: boolean) => {
     const maskSession = maskSessionRef.current;
 
@@ -812,6 +874,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       }
 
       applyScalarDataToSegmentation(loadedMask, { recordHistory: false });
+      applyVisibleLesionSegments(undefined, { preferAllWhenEmpty: true });
       updateMaskState({
         source: response.source === "doctor" ? "doctor" : "algorithm",
         dirty: false,
@@ -1051,6 +1114,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       ),
       mode: "none",
     });
+    applyVisibleLesionSegments(undefined, { preferAllWhenEmpty: true });
     window.setTimeout(() => {
       focusInitialLesionFromUrl();
       if (pendingMaskReloadSource.current) {
@@ -1532,6 +1596,12 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     const brushSizeToken = PubSub.subscribe(MASK_BRUSH_SIZE_TOPIC, (_, delta) => {
       changeBrushSize(delta as number);
     });
+    const visibleSegmentsToken = PubSub.subscribe(
+      MASK_VISIBLE_SEGMENTS_TOPIC,
+      (_, lesionLabels) => {
+        applyVisibleLesionSegments((lesionLabels || []) as string[]);
+      }
+    );
     const reloadToken = PubSub.subscribe(MASK_RELOAD_TOPIC, (_, payload) => {
       reloadSegmentationFromDisk((payload || {}) as MaskReloadPayload);
     });
@@ -1577,6 +1647,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       PubSub.unsubscribe(modeToken);
       PubSub.unsubscribe(visibilityToken);
       PubSub.unsubscribe(brushSizeToken);
+      PubSub.unsubscribe(visibleSegmentsToken);
       PubSub.unsubscribe(reloadToken);
       PubSub.unsubscribe(brushShapeToken);
       PubSub.unsubscribe(undoToken);

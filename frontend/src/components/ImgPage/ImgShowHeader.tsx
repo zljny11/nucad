@@ -482,6 +482,10 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           <div className="NewIconfont">&#xe6ad;</div>
           <div>重置影像</div>
         </div>
+        <div className="buttonContainer" onClick={showLesionEditList}>
+          <div className="NewIconfont">&#9998;</div>
+          <div>病灶列表</div>
+        </div>
         {isEditor ? (
           <>
             <div
@@ -649,12 +653,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
               <div>导出Mask</div>
             </div>
           </>
-        ) : (
-          <div className="buttonContainer" onClick={showLesionEditList}>
-            <div className="NewIconfont">&#9998;</div>
-            <div>病灶编辑</div>
-          </div>
-        )}
+        ) : null}
         {!isEditor && pflag !== "2" && pflag !== "6" ? (
           <div className="buttonContainer" onClick={generateReport}>
             <div className="NewIconfont">&#9998;</div>

@@ -22,10 +22,15 @@ import "./index.less";
 const ImgPage: React.FC = () => {
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const { seriesId, pflag } = patientInfo;
-  const selectedLesions = useRef<string[]>([]);
+  const [selectedLesionsState, setSelectedLesions] = useState<string[]>([]);
+  const selectedLesions = useRef<string[]>(selectedLesionsState);
   const volumeLoaded = useRef<boolean>(false);
   const [lesionEditPanelVisible, setLesionEditPanelVisible] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<SelectedSeries | null>(null);
+
+  useEffect(() => {
+    selectedLesions.current = selectedLesionsState;
+  }, [selectedLesionsState]);
 
   const handleSeriesChange = useCallback((series: SelectedSeries) => {
     setSelectedSeries(series);
@@ -65,7 +70,9 @@ const ImgPage: React.FC = () => {
 
   return (
     <div className="ImgPage">
-      <ImgPageContext.Provider value={{ selectedLesions, volumeLoaded }}>
+      <ImgPageContext.Provider
+        value={{ selectedLesions, setSelectedLesions, volumeLoaded }}
+      >
         <ImgShowHeader pflag={pflag} mode="viewer" />
         <div
           className={
@@ -81,7 +88,7 @@ const ImgPage: React.FC = () => {
           <ImgShow
             volumeIds={volumeIds}
             selectedSeries={selectedSeries}
-            enableMaskEditing={lesionEditPanelVisible}
+            enableMaskEditing
           />
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>

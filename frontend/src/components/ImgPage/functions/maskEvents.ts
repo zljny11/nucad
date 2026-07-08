@@ -9,6 +9,7 @@ const MASK_SAVE_TOPIC = "mask:save";
 const MASK_EXPORT_TOPIC = "mask:export";
 const MASK_ACTIVE_SEGMENT_TOPIC = "mask:setActiveSegment";
 const MASK_RELOAD_TOPIC = "mask:reload";
+const MASK_VISIBLE_SEGMENTS_TOPIC = "mask:setVisibleSegments";
 
 export {
   MASK_STATE_TOPIC,
@@ -22,4 +23,5 @@ export {
   MASK_EXPORT_TOPIC,
   MASK_ACTIVE_SEGMENT_TOPIC,
   MASK_RELOAD_TOPIC,
+  MASK_VISIBLE_SEGMENTS_TOPIC,
 };

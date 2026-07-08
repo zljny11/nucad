@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import PubSub from "pubsub-js";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { updateSheets } from "../../redux/patientSlice";
 import translateFocalAreas from "../../functions/translateFocalAreas";
 import { safeWindowRequire } from "../../utils/electron";
+import ImgPageContext from "./functions/ImgPageContext";
 import {
   LESION_EDIT_CLOSE_TOPIC,
   LESION_EDIT_OPEN_TOPIC,
@@ -12,6 +13,7 @@ import {
 import {
   MASK_ACTIVE_SEGMENT_TOPIC,
   MASK_RELOAD_TOPIC,
+  MASK_VISIBLE_SEGMENTS_TOPIC,
 } from "./functions/maskEvents";
 import { getEffectiveOutputPath } from "./functions/pathUtils";
 
@@ -40,8 +42,16 @@ const formatNumber = (value: string) => {
   return Number.isFinite(numberValue) ? numberValue.toFixed(2) : "";
 };
 
+const normalizeTextValue = (value: unknown) => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return `${value}`;
+};
+
 const createDoctorLesion = (index: number): EditableLesion => ({
-  id: `D-${index}`,
+  id: `${index}`,
   source: "doctor",
   lesionLabel: `${index}`,
   imageIndexs: "",
@@ -84,16 +94,21 @@ const sheetRowToLesion = (
 
   return {
     id:
-      getCellByHeader(data, headerIndex, ["编号", "病灶ID", "id"], 1) ||
-      data[0] ||
+      normalizeTextValue(
+        getCellByHeader(data, headerIndex, ["编号", "病灶ID", "id"], 1) || data[0]
+      ) ||
       `A-${index + 1}`,
     source: "algorithm",
-    lesionLabel: getCellByHeader(data, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2),
-    imageIndexs: getCellByHeader(
-      data,
-      headerIndex,
-      ["中心索引 [x, y, z]", "中心索引", "imageIndexs"],
-      3
+    lesionLabel: normalizeTextValue(
+      getCellByHeader(data, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2)
+    ),
+    imageIndexs: normalizeTextValue(
+      getCellByHeader(
+        data,
+        headerIndex,
+        ["中心索引 [x, y, z]", "中心索引", "imageIndexs"],
+        3
+      )
     ),
     volume: formatNumber(
       getCellByHeader(data, headerIndex, ["体积", "volume"], 6)
@@ -139,31 +154,44 @@ const normalizeImportedRows = (rows: any[]) => {
     if (Array.isArray(row)) {
       const headerIndex = createHeaderIndex(rows[0]);
       return [
-        getCellByHeader(row, headerIndex, ["编号", "病灶ID", "id"], 1) ||
-          row[0] ||
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["编号", "病灶ID", "id"], 1) || row[0]
+        ) ||
           `A-${index + 1}`,
-        getCellByHeader(row, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2),
-        getCellByHeader(
-          row,
-          headerIndex,
-          ["中心索引 [x, y, z]", "中心索引", "imageIndexs"],
-          3
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2)
         ),
-        getCellByHeader(row, headerIndex, ["SUV Max", "SUVmax", "suvMax"], 7),
-        getCellByHeader(row, headerIndex, ["SUV Mean", "SUVmean", "suvMean"], 8),
-        getCellByHeader(row, headerIndex, ["体积", "volume"], 6),
-        getCellByHeader(row, headerIndex, ["所在区域", "区域", "部位"], 16),
+        normalizeTextValue(
+          getCellByHeader(
+            row,
+            headerIndex,
+            ["中心索引 [x, y, z]", "中心索引", "imageIndexs"],
+            3
+          )
+        ),
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["SUV Max", "SUVmax", "suvMax"], 7)
+        ),
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["SUV Mean", "SUVmean", "suvMean"], 8)
+        ),
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["体积", "volume"], 6)
+        ),
+        normalizeTextValue(
+          getCellByHeader(row, headerIndex, ["所在区域", "区域", "部位"], 16)
+        ),
       ];
     }
 
     return [
-      row.id || row.lesionId || `A-${index + 1}`,
-      row.lesionLabel || row.label || row.segmentIndex || "",
-      row.imageIndexs || row.imageIndexes || row.indexes || "",
-      row.suvMax || row.SUVmax || row.suv_max || "",
-      row.suvMean || row.SUVmean || row.suv_mean || "",
-      row.volume || row.volumeMl || "",
-      row.area || row.location || row.part || "",
+      normalizeTextValue(row.id || row.lesionId || `A-${index + 1}`),
+      normalizeTextValue(row.lesionLabel || row.label || row.segmentIndex || ""),
+      normalizeTextValue(row.imageIndexs || row.imageIndexes || row.indexes || ""),
+      normalizeTextValue(row.suvMax || row.SUVmax || row.suv_max || ""),
+      normalizeTextValue(row.suvMean || row.SUVmean || row.suv_mean || ""),
+      normalizeTextValue(row.volume || row.volumeMl || ""),
+      normalizeTextValue(row.area || row.location || row.part || ""),
     ];
   });
 };
@@ -171,11 +199,15 @@ const normalizeImportedRows = (rows: any[]) => {
 const EditableLesionPanel: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const { selectedLesions, setSelectedLesions } = useContext(ImgPageContext);
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const sheets = useAppSelector((state) => state.patient.sheets);
   const [doctorLesions, setDoctorLesions] = useState<EditableLesion[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [importMessage, setImportMessage] = useState("");
+  const [checkedLesions, setCheckedLesions] = useState<string[]>(
+    selectedLesions.current || []
+  );
   const effectiveOutputPath = getEffectiveOutputPath(
     patientInfo.outputPath,
     patientInfo.inputPath
@@ -266,6 +298,7 @@ const EditableLesionPanel: React.FC = () => {
       })
     );
     setSelectedId("");
+    setCheckedLesions([]);
     return nextData.length;
   };
 
@@ -380,6 +413,54 @@ const EditableLesionPanel: React.FC = () => {
   );
 
   const lesions = [...algorithmLesions, ...doctorLesions];
+  const lesionSelectionValues = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          lesions
+            .map((lesion) => normalizeTextValue(lesion.lesionLabel).trim())
+            .filter((lesionLabel) => !!lesionLabel)
+        )
+      ),
+    [lesions]
+  );
+
+  const syncCheckedLesions = (nextCheckedLesions: string[]) => {
+    const nextValues = Array.from(
+      new Set(
+        nextCheckedLesions
+          .map((lesionLabel) => lesionLabel.trim())
+          .filter((lesionLabel) => !!lesionLabel)
+      )
+    );
+
+    setCheckedLesions(nextValues);
+    selectedLesions.current = nextValues;
+    setSelectedLesions(nextValues);
+    PubSub.publish(MASK_VISIBLE_SEGMENTS_TOPIC, nextValues);
+  };
+
+  useEffect(() => {
+    const validCheckedLesions = checkedLesions.filter((lesionLabel) =>
+      lesionSelectionValues.includes(lesionLabel)
+    );
+
+    if (!lesionSelectionValues.length) {
+      if (checkedLesions.length) {
+        syncCheckedLesions([]);
+      }
+      return;
+    }
+
+    if (!validCheckedLesions.length) {
+      syncCheckedLesions(lesionSelectionValues);
+      return;
+    }
+
+    if (validCheckedLesions.length !== checkedLesions.length) {
+      syncCheckedLesions(validCheckedLesions);
+    }
+  }, [checkedLesions, lesionSelectionValues]);
 
   const updateDoctorLesion = (
     id: string,
@@ -441,12 +522,35 @@ const EditableLesionPanel: React.FC = () => {
   };
 
   const addDoctorLesion = () => {
-    const nextLesion = createDoctorLesion(doctorLesions.length + 1);
+    const nextLesion = createDoctorLesion(lesions.length + 1);
     setDoctorLesions((previous) => [...previous, nextLesion]);
     setSelectedId(nextLesion.id);
   };
 
+  const ensureVisibleLesion = (lesion: EditableLesion) => {
+    const lesionLabel = normalizeTextValue(lesion.lesionLabel).trim();
+    if (!lesionLabel || checkedLesions.includes(lesionLabel)) {
+      return;
+    }
+
+    syncCheckedLesions([...checkedLesions, lesionLabel]);
+  };
+
+  const toggleLesionVisibility = (lesion: EditableLesion, checked: boolean) => {
+    const lesionLabel = normalizeTextValue(lesion.lesionLabel).trim();
+    if (!lesionLabel) {
+      return;
+    }
+
+    syncCheckedLesions(
+      checked
+        ? [...checkedLesions, lesionLabel]
+        : checkedLesions.filter((value) => value !== lesionLabel)
+    );
+  };
+
   const locateLesion = (lesion: EditableLesion) => {
+    ensureVisibleLesion(lesion);
     const lesionLabel = Number(lesion.lesionLabel);
     if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
       PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
@@ -467,6 +571,7 @@ const EditableLesionPanel: React.FC = () => {
   };
 
   const editMask = (lesion: EditableLesion) => {
+    ensureVisibleLesion(lesion);
     PubSub.publish(LESION_EDIT_OPEN_TOPIC, lesion);
     navigate(
       `/LesionEditPage?lesionId=${encodeURIComponent(lesion.id)}` +
@@ -509,6 +614,7 @@ const EditableLesionPanel: React.FC = () => {
       ) : null}
       <div className="editableLesionTable">
         <div className="editableLesionRow editableLesionHead">
+          <span>显示</span>
           <span>病灶ID</span>
           <span>来源</span>
           <span>标签</span>
@@ -529,12 +635,25 @@ const EditableLesionPanel: React.FC = () => {
               key={`${lesion.source}-${lesion.id}`}
               onClick={() => {
                 setSelectedId(lesion.id);
+                ensureVisibleLesion(lesion);
                 const lesionLabel = Number(lesion.lesionLabel);
                 if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
                   PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
                 }
               }}
             >
+              <span className="editableLesionCheckboxCell">
+                <input
+                  type="checkbox"
+                  checked={checkedLesions.includes(
+                    normalizeTextValue(lesion.lesionLabel)
+                  )}
+                  onChange={(event) =>
+                    toggleLesionVisibility(lesion, event.target.checked)
+                  }
+                  onClick={(event) => event.stopPropagation()}
+                />
+              </span>
               <span>{lesion.id}</span>
               <span>{lesion.source === "algorithm" ? "算法" : "医生"}</span>
               <span>{lesion.lesionLabel || "-"}</span>
@@ -567,7 +686,7 @@ const EditableLesionPanel: React.FC = () => {
                   定位
                 </button>
                 <button type="button" onClick={() => editMask(lesion)}>
-                  编辑Mask
+                  编辑
                 </button>
               </span>
             </div>
