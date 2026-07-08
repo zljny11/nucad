@@ -30,10 +30,11 @@ const getSegmentationUrl = (seriesId: string) =>
 
 const loadSegmentation = async (
   seriesId: string,
-  outputPath: string
+  outputPath: string,
+  source?: "doctor" | "algorithm"
 ): Promise<SegmentationLoadResponse> => {
   const response = await axios.get(getSegmentationUrl(seriesId), {
-    params: { outputPath },
+    params: { outputPath, source },
   });
   return response.data;
 };

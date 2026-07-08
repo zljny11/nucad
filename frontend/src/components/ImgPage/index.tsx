@@ -78,7 +78,11 @@ const ImgPage: React.FC = () => {
             selectedSeriesId={selectedSeries?.id || ""}
             onSeriesChange={handleSeriesChange}
           />
-          <ImgShow volumeIds={volumeIds} selectedSeries={selectedSeries} />
+          <ImgShow
+            volumeIds={volumeIds}
+            selectedSeries={selectedSeries}
+            enableMaskEditing={lesionEditPanelVisible}
+          />
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>
         <Report />

@@ -9,6 +9,11 @@ import {
   LESION_EDIT_CLOSE_TOPIC,
   LESION_EDIT_OPEN_TOPIC,
 } from "./functions/lesionEditEvents";
+import {
+  MASK_ACTIVE_SEGMENT_TOPIC,
+  MASK_RELOAD_TOPIC,
+} from "./functions/maskEvents";
+import { getEffectiveOutputPath } from "./functions/pathUtils";
 
 const fs = safeWindowRequire ? safeWindowRequire("fs") : null;
 const path = safeWindowRequire ? safeWindowRequire("path") : null;
@@ -22,6 +27,7 @@ type LesionSource = "algorithm" | "doctor";
 interface EditableLesion {
   id: string;
   source: LesionSource;
+  lesionLabel: string;
   imageIndexs: string;
   volume: string;
   suvMax: string;
@@ -37,6 +43,7 @@ const formatNumber = (value: string) => {
 const createDoctorLesion = (index: number): EditableLesion => ({
   id: `D-${index}`,
   source: "doctor",
+  lesionLabel: `${index}`,
   imageIndexs: "",
   volume: "",
   suvMax: "",
@@ -81,6 +88,7 @@ const sheetRowToLesion = (
       data[0] ||
       `A-${index + 1}`,
     source: "algorithm",
+    lesionLabel: getCellByHeader(data, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2),
     imageIndexs: getCellByHeader(
       data,
       headerIndex,
@@ -134,6 +142,7 @@ const normalizeImportedRows = (rows: any[]) => {
         getCellByHeader(row, headerIndex, ["编号", "病灶ID", "id"], 1) ||
           row[0] ||
           `A-${index + 1}`,
+        getCellByHeader(row, headerIndex, ["病灶标签", "标签", "lesionLabel"], 2),
         getCellByHeader(
           row,
           headerIndex,
@@ -149,6 +158,7 @@ const normalizeImportedRows = (rows: any[]) => {
 
     return [
       row.id || row.lesionId || `A-${index + 1}`,
+      row.lesionLabel || row.label || row.segmentIndex || "",
       row.imageIndexs || row.imageIndexes || row.indexes || "",
       row.suvMax || row.SUVmax || row.suv_max || "",
       row.suvMean || row.SUVmean || row.suv_mean || "",
@@ -166,6 +176,10 @@ const EditableLesionPanel: React.FC = () => {
   const [doctorLesions, setDoctorLesions] = useState<EditableLesion[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [importMessage, setImportMessage] = useState("");
+  const effectiveOutputPath = getEffectiveOutputPath(
+    patientInfo.outputPath,
+    patientInfo.inputPath
+  );
 
   const getLowerFileName = (filePath: string) =>
     path ? path.basename(filePath).toLowerCase() : filePath.toLowerCase();
@@ -173,6 +187,86 @@ const EditableLesionPanel: React.FC = () => {
   const isNiftiFile = (filePath: string) => {
     const fileName = getLowerFileName(filePath);
     return !fileName.startsWith("._") && (fileName.endsWith(".nii") || fileName.endsWith(".nii.gz"));
+  };
+
+  const isLesionReportFile = (filePath: string) => {
+    const fileName = getLowerFileName(filePath);
+    return !fileName.startsWith("._") && (
+      fileName.endsWith(".xlsx") ||
+      fileName.endsWith(".xls") ||
+      fileName.endsWith(".csv") ||
+      fileName.endsWith(".json")
+    );
+  };
+
+  const collectAlgorithmFiles = (filePaths: string[]) => {
+    if (!fs || !path) {
+      return [];
+    }
+
+    return filePaths.flatMap((filePath) => {
+      try {
+        if (fs.statSync(filePath).isDirectory()) {
+          return fs
+            .readdirSync(filePath)
+            .map((fileName: string) => path.join(filePath, fileName));
+        }
+      } catch (error) {
+        return [];
+      }
+
+      return [filePath];
+    });
+  };
+
+  const readLesionRows = (filePath: string) => {
+    if (!fs || !path) {
+      return [];
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+
+    if (ext === ".xlsx" || ext === ".xls") {
+      if (!xlsx) {
+        throw new Error("Excel parser is unavailable");
+      }
+
+      return xlsx.parse(filePath)[0]?.data || [];
+    }
+
+    if (ext === ".csv") {
+      return parseCsvRows(fs.readFileSync(filePath, "utf8"));
+    }
+
+    if (ext === ".json") {
+      return parseJsonRows(fs.readFileSync(filePath, "utf8"));
+    }
+
+    return [];
+  };
+
+  const applyLesionRows = (rows: any[], sourceName: string) => {
+    const nextData = normalizeImportedRows(rows);
+
+    dispatch(
+      updateSheets({
+        0: {
+          name: sourceName,
+          header: [
+            "编号",
+            "病灶标签",
+            "中心索引 [x, y, z]",
+            "SUV Max",
+            "SUV Mean",
+            "体积",
+            "所在区域",
+          ],
+          data: nextData,
+        },
+      })
+    );
+    setSelectedId("");
+    return nextData.length;
   };
 
   const importAlgorithmFile = async () => {
@@ -193,19 +287,24 @@ const EditableLesionPanel: React.FC = () => {
       return;
     }
 
-    const niftiFiles = filePaths.filter(isNiftiFile);
+    const algorithmFiles = collectAlgorithmFiles(filePaths);
+    const niftiFiles = algorithmFiles.filter(isNiftiFile);
+    const lesionReport =
+      algorithmFiles.find(
+        (filePath: string) => getLowerFileName(filePath) === "lesion_report.xlsx"
+      ) || algorithmFiles.find(isLesionReportFile);
     if (!niftiFiles.length) {
       setImportMessage("当前仅支持导入 NIfTI 算法Mask（.nii / .nii.gz）");
       return;
     }
 
-    if (!patientInfo.outputPath) {
+    if (!effectiveOutputPath) {
       setImportMessage("当前病例缺少输出目录，无法保存算法Mask");
       return;
     }
 
     try {
-      const segmentationDir = path.join(patientInfo.outputPath, "out", "segmentation");
+      const segmentationDir = path.join(effectiveOutputPath, "out", "segmentation");
       const importsDir = path.join(segmentationDir, "algorithm_imports");
       const targetPath = path.join(segmentationDir, "algorithm_mask.nii.gz");
       fs.mkdirSync(segmentationDir, { recursive: true });
@@ -220,12 +319,23 @@ const EditableLesionPanel: React.FC = () => {
         niftiFiles[0];
       fs.copyFileSync(primaryMask, targetPath);
 
-      const skippedCount = filePaths.length - niftiFiles.length;
+      let lesionCount = 0;
+      if (lesionReport) {
+        const reportTargetPath = path.join(effectiveOutputPath, "out", path.basename(lesionReport));
+        fs.mkdirSync(path.dirname(reportTargetPath), { recursive: true });
+        fs.copyFileSync(lesionReport, reportTargetPath);
+        lesionCount = applyLesionRows(readLesionRows(lesionReport), path.basename(lesionReport));
+      }
+
+      const skippedCount = algorithmFiles.length - niftiFiles.length - (lesionReport ? 1 : 0);
       setImportMessage(
         `已导入 ${niftiFiles.length} 个算法文件，当前Mask：${path.basename(primaryMask)}${
-          skippedCount ? `，跳过 ${skippedCount} 个非NIfTI文件` : ""
+          lesionReport ? `，病灶列表 ${lesionCount} 条` : ""
+        }${
+          skippedCount > 0 ? `，跳过 ${skippedCount} 个其他文件` : ""
         }`
       );
+      PubSub.publish(MASK_RELOAD_TOPIC, { source: "algorithm" });
     } catch (error) {
       console.error("Failed to import algorithm mask:", error);
       setImportMessage("算法Mask导入失败");
@@ -247,37 +357,13 @@ const EditableLesionPanel: React.FC = () => {
     try {
       setImportMessage("正在导入病灶列表...");
       const ext = path.extname(filePath).toLowerCase();
-      let rows: any[] = [];
-
-      if (ext === ".xlsx" || ext === ".xls") {
-        if (!xlsx) {
-          setImportMessage("当前环境无法解析Excel病灶列表");
-          return;
-        }
-
-        const tempSheets = xlsx.parse(filePath);
-        rows = tempSheets[0]?.data || [];
-      } else if (ext === ".csv") {
-        rows = parseCsvRows(fs.readFileSync(filePath, "utf8"));
-      } else if (ext === ".json") {
-        rows = parseJsonRows(fs.readFileSync(filePath, "utf8"));
-      } else {
+      if (![".xlsx", ".xls", ".csv", ".json"].includes(ext)) {
         setImportMessage("暂不支持该病灶列表格式");
         return;
       }
 
-      const nextData = normalizeImportedRows(rows);
-      dispatch(
-        updateSheets({
-          0: {
-            name: path.basename(filePath),
-            header: ["编号", "中心索引 [x, y, z]", "SUV Max", "SUV Mean", "体积", "所在区域"],
-            data: nextData,
-          },
-        })
-      );
-      setSelectedId("");
-      setImportMessage(`已导入 ${nextData.length} 条病灶列表记录`);
+      const lesionCount = applyLesionRows(readLesionRows(filePath), path.basename(filePath));
+      setImportMessage(`已导入 ${lesionCount} 条病灶列表记录`);
     } catch (error) {
       console.error("Failed to import lesion list:", error);
       setImportMessage("病灶列表文件读取失败");
@@ -330,10 +416,10 @@ const EditableLesionPanel: React.FC = () => {
               const headerName = names.find((name) => headerIndex[name] !== undefined);
               nextRow[headerName ? headerIndex[headerName] : fallbackIndex] = value;
             };
-            if (key === "volume") setCell(["体积", "volume"], 4);
-            if (key === "suvMax") setCell(["SUV Max", "SUVmax", "suvMax"], 2);
-            if (key === "suvMean") setCell(["SUV Mean", "SUVmean", "suvMean"], 3);
-            if (key === "area") setCell(["所在区域", "区域", "部位"], 5);
+            if (key === "volume") setCell(["体积", "volume"], 5);
+            if (key === "suvMax") setCell(["SUV Max", "SUVmax", "suvMax"], 3);
+            if (key === "suvMean") setCell(["SUV Mean", "SUVmean", "suvMean"], 4);
+            if (key === "area") setCell(["所在区域", "区域", "部位"], 6);
             return nextRow;
           }),
         },
@@ -361,6 +447,11 @@ const EditableLesionPanel: React.FC = () => {
   };
 
   const locateLesion = (lesion: EditableLesion) => {
+    const lesionLabel = Number(lesion.lesionLabel);
+    if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
+      PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
+    }
+
     if (!lesion.imageIndexs) {
       return;
     }
@@ -377,7 +468,11 @@ const EditableLesionPanel: React.FC = () => {
 
   const editMask = (lesion: EditableLesion) => {
     PubSub.publish(LESION_EDIT_OPEN_TOPIC, lesion);
-    navigate(`/LesionEditPage?lesionId=${encodeURIComponent(lesion.id)}`);
+    navigate(
+      `/LesionEditPage?lesionId=${encodeURIComponent(lesion.id)}` +
+        `&lesionLabel=${encodeURIComponent(lesion.lesionLabel || "")}` +
+        `&imageIndexs=${encodeURIComponent(lesion.imageIndexs || "")}`
+    );
   };
 
   return (
@@ -416,6 +511,7 @@ const EditableLesionPanel: React.FC = () => {
         <div className="editableLesionRow editableLesionHead">
           <span>病灶ID</span>
           <span>来源</span>
+          <span>标签</span>
           <span>SUVmax</span>
           <span>SUVmean</span>
           <span>体积(ml)</span>
@@ -431,10 +527,17 @@ const EditableLesionPanel: React.FC = () => {
                   : "editableLesionRow"
               }
               key={`${lesion.source}-${lesion.id}`}
-              onClick={() => setSelectedId(lesion.id)}
+              onClick={() => {
+                setSelectedId(lesion.id);
+                const lesionLabel = Number(lesion.lesionLabel);
+                if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
+                  PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
+                }
+              }}
             >
               <span>{lesion.id}</span>
               <span>{lesion.source === "algorithm" ? "算法" : "医生"}</span>
+              <span>{lesion.lesionLabel || "-"}</span>
               <input
                 value={lesion.suvMax}
                 onChange={(event) =>

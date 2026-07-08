@@ -23,10 +23,11 @@ ipcMain.handle('select-dicom-folder', async () => {
 
 ipcMain.handle('select-algorithm-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: '选择算法结果文件',
-    properties: ['openFile', 'multiSelections'],
+    title: '选择算法结果文件或目录',
+    properties: ['openFile', 'openDirectory', 'multiSelections'],
     filters: [
       { name: 'NIfTI算法Mask', extensions: ['nii', 'gz'] },
+      { name: '算法报告', extensions: ['xlsx', 'xls', 'csv', 'json'] },
       { name: '其他算法格式', extensions: ['nrrd', 'mha', 'mhd'] },
       { name: 'All Files', extensions: ['*'] },
     ],

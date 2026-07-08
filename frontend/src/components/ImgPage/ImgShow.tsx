@@ -29,11 +29,14 @@ import {
   setToolPassiveFun,
 } from "./functions/cornerstoneAddTools";
 import { renderingEngineId, viewportIds } from "./functions/getConstant";
+import { getEffectiveOutputPath } from "./functions/pathUtils";
 import loadImages from "./functions/loadImages";
 import {
+  MASK_ACTIVE_SEGMENT_TOPIC,
   MASK_BRUSH_SIZE_TOPIC,
   MASK_BRUSH_SHAPE_TOPIC,
   MASK_EXPORT_TOPIC,
+  MASK_RELOAD_TOPIC,
   MASK_REDO_TOPIC,
   MASK_SAVE_TOPIC,
   MASK_SET_MODE_TOPIC,
@@ -68,6 +71,9 @@ const BRUSH_STRATEGY = "FILL_INSIDE_CIRCLE";
 const ERASE_STRATEGY = "ERASE_INSIDE_CIRCLE";
 const DEFAULT_MASK_BRUSH_SIZE = 8;
 type BrushShape = "circle" | "square";
+type MaskReloadPayload = {
+  source?: "doctor" | "algorithm";
+};
 const electron = safeWindowRequire ? safeWindowRequire("electron") : null;
 const ipcRenderer = electron?.ipcRenderer;
 
@@ -172,28 +178,10 @@ const uint8ArrayToBase64 = (data: Uint8Array) => {
 
 const cloneScalarData = (data: Uint8Array) => new Uint8Array(data);
 
-const getEffectiveOutputPath = (outputPath: string, inputPath: string) => {
-  const trimmedOutputPath = String(outputPath || "").trim();
-
-  if (trimmedOutputPath) {
-    return trimmedOutputPath;
-  }
-
-  const normalizedInputPath = String(inputPath || "").trim();
-  const pathMarkers = [
-    { input: "/config/input/", output: "/config/output/" },
-    { input: "\\config\\input\\", output: "\\config\\output\\" },
-  ];
-  const matchedMarker = pathMarkers.find((marker) =>
-    normalizedInputPath.includes(marker.input)
-  );
-
-  if (matchedMarker) {
-    return normalizedInputPath.replace(matchedMarker.input, matchedMarker.output);
-  }
-
-  return "";
-};
+const parseIndexList = (value: string | null) =>
+  (value || "")
+    .match(/\d+(\.\d+)?/g)
+    ?.map((imgIndex) => Math.round(parseFloat(imgIndex))) || [];
 
 const getViewportOrThrow = (viewportId: string) => {
   const viewport = renderingEngine.getViewport(viewportId) as Types.IVolumeViewport;
@@ -525,6 +513,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const preMPR = useRef("AXIAL");
   const loadTokenRef = useRef(0);
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
+  const initialLesionFocusApplied = useRef(false);
+  const pendingMaskReloadSource = useRef<"doctor" | "algorithm" | undefined>(
+    undefined
+  );
 
   const setMaskLoadingProgress = (percent: number, text: string) => {
     if (!showLoadingProgress) {
@@ -578,6 +570,88 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       setMaskBanner(maskSessionRef.current.message);
     }
     publishMaskState();
+  };
+
+  const setActiveMaskSegment = (
+    segmentIndex: number,
+    options: { message?: string } = {}
+  ) => {
+    const maskSession = maskSessionRef.current;
+
+    if (!maskSession.segmentationId || !Number.isFinite(segmentIndex)) {
+      return;
+    }
+
+    const nextSegmentIndex = Math.max(1, Math.round(segmentIndex));
+    segmentation.segmentIndex.setActiveSegmentIndex(
+      maskSession.segmentationId,
+      nextSegmentIndex
+    );
+    renderingEngine?.render();
+
+    if (options.message) {
+      updateMaskState({
+        message: options.message,
+      });
+    }
+  };
+
+  const jumpToImageIndexes = (imageIndexs: number[]) => {
+    if (!imageIndexs.length || !renderingEngine) {
+      return;
+    }
+
+    viewportIds.forEach((viewportId, index) => {
+      if (index === 3) {
+        return;
+      }
+
+      const viewport = renderingEngine.getViewport(viewportId);
+      if (!viewport?.element) {
+        return;
+      }
+
+      jumpToSlice(viewport.element, {
+        imageIndex:
+          index === 1 ? PET_CORONAL_Num - imageIndexs[2 - index] : imageIndexs[2 - index],
+      });
+
+      switch (index) {
+        case 0:
+          setPET_AXIAL_Index(imageIndexs[2] + 1);
+          break;
+        case 1:
+          setPET_CORONAL_Index(PET_CORONAL_Num - imageIndexs[1] + 1);
+          break;
+        case 2:
+          setPET_SAGITTAL_Index(imageIndexs[0] + 1);
+          break;
+        default:
+          break;
+      }
+    });
+  };
+
+  const focusInitialLesionFromUrl = () => {
+    if (!enableMaskEditing || initialLesionFocusApplied.current) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const lesionLabel = Number(params.get("lesionLabel"));
+    const imageIndexs = parseIndexList(params.get("imageIndexs"));
+
+    if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
+      setActiveMaskSegment(lesionLabel, {
+        message: `当前编辑病灶标签 ${lesionLabel}`,
+      });
+    }
+
+    if (imageIndexs.length) {
+      jumpToImageIndexes(imageIndexs);
+    }
+
+    initialLesionFocusApplied.current = true;
   };
 
   const setViewportWindowLevel = (
@@ -680,6 +754,83 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       triggerSegmentationRender();
     } finally {
       maskSessionRef.current.suppressHistory = false;
+    }
+  };
+
+  const reloadSegmentationFromDisk = async (payload: MaskReloadPayload = {}) => {
+    const maskSession = maskSessionRef.current;
+    const segmentationVolume = getSegmentationVolume();
+    const referencedVolume = cache.getVolume(maskSession.referencedVolumeId);
+
+    if (!enableMaskEditing) {
+      return;
+    }
+
+    if (
+      !effectiveOutputPath ||
+      !maskSession.ready ||
+      !segmentationVolume ||
+      !referencedVolume
+    ) {
+      pendingMaskReloadSource.current = payload.source;
+      return;
+    }
+
+    try {
+      const response = await loadSegmentation(
+        seriesId,
+        effectiveOutputPath,
+        payload.source
+      );
+
+      if (
+        !response.success ||
+        !response.exists ||
+        !response.scalarDataBase64 ||
+        !response.dimensions
+      ) {
+        updateMaskState({
+          message: "未找到可加载的算法Mask",
+        });
+        return;
+      }
+
+      const loadedMask = base64ToUint8Array(response.scalarDataBase64);
+      const expectedLength =
+        response.dimensions[0] * response.dimensions[1] * response.dimensions[2];
+
+      if (
+        expectedLength !== (referencedVolume.getScalarData() as Uint8Array).length ||
+        response.dimensions[0] !== referencedVolume.dimensions[0] ||
+        response.dimensions[1] !== referencedVolume.dimensions[1] ||
+        response.dimensions[2] !== referencedVolume.dimensions[2]
+      ) {
+        updateMaskState({
+          message: "Mask尺寸与当前PET/CT不一致，无法刷新显示",
+        });
+        return;
+      }
+
+      applyScalarDataToSegmentation(loadedMask, { recordHistory: false });
+      updateMaskState({
+        source: response.source === "doctor" ? "doctor" : "algorithm",
+        dirty: false,
+        canUndo: false,
+        canRedo: false,
+        undoStack: [],
+        redoStack: [],
+        committedSnapshot: cloneScalarData(loadedMask),
+        savedSnapshot: cloneScalarData(loadedMask),
+        message:
+          response.source === "doctor"
+            ? "已刷新医生修订版Mask"
+            : "已刷新算法初始Mask",
+      });
+      pendingMaskReloadSource.current = undefined;
+    } catch (error) {
+      updateMaskState({
+        message: "Mask刷新失败",
+      });
     }
   };
 
@@ -900,6 +1051,12 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       ),
       mode: "none",
     });
+    window.setTimeout(() => {
+      focusInitialLesionFromUrl();
+      if (pendingMaskReloadSource.current) {
+        reloadSegmentationFromDisk({ source: pendingMaskReloadSource.current });
+      }
+    }, 0);
     window.setTimeout(finishMaskLoadingProgress, 350);
   };
 
@@ -1348,28 +1505,23 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       setMaskBanner("影像数据加载失败，请检查导入序列");
     });
     const jumpToken = PubSub.subscribe("imgJumpByIndex", (msg, data) => {
-      viewportIds.forEach((viewportId, index) => {
-        if (index !== 3) {
-          const viewport = renderingEngine.getViewport(viewportId);
-          jumpToSlice(viewport.element, {
-            imageIndex:
-              index === 1 ? PET_CORONAL_Num - data[2 - index] : data[2 - index],
-          });
-          switch (index) {
-            case 0:
-              setPET_AXIAL_Index(data[2] + 1);
-              break;
-            case 1:
-              setPET_CORONAL_Index(PET_CORONAL_Num - data[1] + 1);
-              break;
-            case 2:
-              setPET_SAGITTAL_Index(data[0] + 1);
-              break;
-            default:
-              break;
-          }
-        }
-      });
+      jumpToImageIndexes(data as number[]);
+    });
+    const activeSegmentToken = PubSub.subscribe(
+      MASK_ACTIVE_SEGMENT_TOPIC,
+      (_, segmentIndex) => {
+        setActiveMaskSegment(Number(segmentIndex), {
+          message: `当前病灶标签 ${segmentIndex}`,
+        });
+      }
+    );
+    const lesionOpenToken = PubSub.subscribe("lesionEdit:open", (_, lesion: any) => {
+      const lesionLabel = Number(lesion?.lesionLabel);
+      if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
+        setActiveMaskSegment(lesionLabel, {
+          message: `当前病灶标签 ${lesionLabel}`,
+        });
+      }
     });
     const modeToken = PubSub.subscribe(MASK_SET_MODE_TOPIC, (_, mode) => {
       setMaskMode(mode as "none" | "brush" | "erase");
@@ -1379,6 +1531,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
     const brushSizeToken = PubSub.subscribe(MASK_BRUSH_SIZE_TOPIC, (_, delta) => {
       changeBrushSize(delta as number);
+    });
+    const reloadToken = PubSub.subscribe(MASK_RELOAD_TOPIC, (_, payload) => {
+      reloadSegmentationFromDisk((payload || {}) as MaskReloadPayload);
     });
     const brushShapeToken = PubSub.subscribe(MASK_BRUSH_SHAPE_TOPIC, (_, shape) => {
       setBrushShape(shape as BrushShape);
@@ -1417,9 +1572,12 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         segmentationModifiedHandler
       );
       PubSub.unsubscribe(jumpToken);
+      PubSub.unsubscribe(activeSegmentToken);
+      PubSub.unsubscribe(lesionOpenToken);
       PubSub.unsubscribe(modeToken);
       PubSub.unsubscribe(visibilityToken);
       PubSub.unsubscribe(brushSizeToken);
+      PubSub.unsubscribe(reloadToken);
       PubSub.unsubscribe(brushShapeToken);
       PubSub.unsubscribe(undoToken);
       PubSub.unsubscribe(redoToken);

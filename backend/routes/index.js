@@ -317,7 +317,7 @@ router.get('/licenseVerify',(req,res)=>{
 })
 
 router.get('/study/:seriesId/segmentation', (req, res) => {
-  const { outputPath } = req.query
+  const { outputPath, source } = req.query
 
   if (!outputPath) {
     return res.send({
@@ -329,10 +329,19 @@ router.get('/study/:seriesId/segmentation', (req, res) => {
   }
 
   const segmentationDir = path.join(outputPath, 'out', 'segmentation')
-  const candidateFiles = [
-    { source: 'doctor', filePath: path.join(segmentationDir, 'doctor_mask.nii.gz') },
-    { source: 'algorithm', filePath: path.join(segmentationDir, 'algorithm_mask.nii.gz') },
+  const doctorCandidate = { source: 'doctor', filePath: path.join(segmentationDir, 'doctor_mask.nii.gz') }
+  const algorithmCandidate = { source: 'algorithm', filePath: path.join(segmentationDir, 'algorithm_mask.nii.gz') }
+  let candidateFiles = [
+    doctorCandidate,
+    algorithmCandidate,
   ]
+
+  if (source === 'algorithm') {
+    candidateFiles = [algorithmCandidate]
+  } else if (source === 'doctor') {
+    candidateFiles = [doctorCandidate]
+  }
+
   const parseErrors = []
 
   for (const candidate of candidateFiles) {
@@ -341,7 +350,9 @@ router.get('/study/:seriesId/segmentation', (req, res) => {
     }
 
     try {
-      const parsedMask = readMaskFile(fs.readFileSync(candidate.filePath))
+      const parsedMask = readMaskFile(fs.readFileSync(candidate.filePath), {
+        preserveLabels: true,
+      })
       const positiveVoxelCount = countPositiveVoxels(parsedMask.scalarData)
       return res.send({
         success: true,
@@ -371,7 +382,7 @@ router.get('/study/:seriesId/segmentation', (req, res) => {
     success: true,
     exists: false,
     source: 'none',
-    path: path.join(segmentationDir, 'algorithm_mask.nii.gz'),
+    path: source === 'doctor' ? doctorCandidate.filePath : algorithmCandidate.filePath,
     message: 'No segmentation file found',
   })
 })

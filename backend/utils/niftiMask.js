@@ -23,9 +23,10 @@ function getEndian(dataView) {
   throw new Error("Unsupported NIfTI header");
 }
 
-function normalizeMaskData(rawBuffer, datatype, count, littleEndian) {
+function normalizeMaskData(rawBuffer, datatype, count, littleEndian, options = {}) {
   const dataView = getDataView(rawBuffer);
   const maskData = new Uint8Array(count);
+  const preserveLabels = options.preserveLabels === true;
   let readValue;
 
   switch (datatype) {
@@ -65,13 +66,18 @@ function normalizeMaskData(rawBuffer, datatype, count, littleEndian) {
   }[datatype];
 
   for (let i = 0; i < count; i += 1) {
-    maskData[i] = readValue(i * bytesPerValue) > 0 ? 1 : 0;
+    const value = readValue(i * bytesPerValue);
+    if (preserveLabels) {
+      maskData[i] = Math.max(0, Math.min(255, Math.round(value)));
+    } else {
+      maskData[i] = value > 0 ? 1 : 0;
+    }
   }
 
   return maskData;
 }
 
-function readMaskFile(fileBuffer) {
+function readMaskFile(fileBuffer, options = {}) {
   const inflated = isGzipped(fileBuffer) ? zlib.gunzipSync(fileBuffer) : fileBuffer;
   const dataView = getDataView(inflated);
   const littleEndian = getEndian(dataView);
@@ -93,7 +99,13 @@ function readMaskFile(fileBuffer) {
   }
 
   const rawBuffer = inflated.subarray(voxOffset);
-  const scalarData = normalizeMaskData(rawBuffer, datatype, voxelCount, littleEndian);
+  const scalarData = normalizeMaskData(
+    rawBuffer,
+    datatype,
+    voxelCount,
+    littleEndian,
+    options
+  );
 
   return {
     dimensions,
