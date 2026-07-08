@@ -415,4 +415,46 @@ router.post('/study/:seriesId/segmentation', (req, res) => {
   }
 })
 
+router.post('/study/:seriesId/segmentation/export', (req, res) => {
+  const { exportPath, dimensions, spacing, origin, direction, scalarDataBase64 } = req.body
+
+  if (!exportPath || !dimensions || !scalarDataBase64) {
+    return res.status(400).send({ error: 'Missing required segmentation export payload' })
+  }
+
+  const voxelCount = dimensions[0] * dimensions[1] * dimensions[2]
+  const scalarData = Uint8Array.from(Buffer.from(scalarDataBase64, 'base64'))
+
+  if (scalarData.length !== voxelCount) {
+    return res.status(400).send({ error: 'Segmentation voxel count does not match dimensions' })
+  }
+
+  try {
+    const safeExportPath = String(exportPath).endsWith('.nii.gz')
+      ? String(exportPath)
+      : `${exportPath}.nii.gz`
+    const positiveVoxelCount = countPositiveVoxels(scalarData)
+    const fileBuffer = writeMaskFile({
+      dimensions,
+      spacing,
+      origin,
+      direction,
+      scalarData,
+    })
+
+    fs.mkdirSync(path.dirname(safeExportPath), { recursive: true })
+    fs.writeFileSync(safeExportPath, fileBuffer)
+
+    return res.send({
+      success: true,
+      path: safeExportPath,
+      positiveVoxelCount,
+      isEmptyMask: positiveVoxelCount === 0,
+    })
+  } catch (error) {
+    console.error('Failed to export segmentation:', error)
+    return res.status(500).send({ error: 'Failed to export segmentation' })
+  }
+})
+
 module.exports = router

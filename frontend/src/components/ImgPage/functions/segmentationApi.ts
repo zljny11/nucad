@@ -21,6 +21,10 @@ interface SegmentationSavePayload {
   scalarDataBase64: string;
 }
 
+interface SegmentationExportPayload extends SegmentationSavePayload {
+  exportPath: string;
+}
+
 const getSegmentationUrl = (seriesId: string) =>
   `http://localhost:4001/study/${encodeURIComponent(seriesId)}/segmentation`;
 
@@ -42,5 +46,17 @@ const saveSegmentation = async (
   return response.data;
 };
 
-export type { SegmentationLoadResponse, SegmentationSavePayload };
-export { loadSegmentation, saveSegmentation };
+const exportSegmentation = async (
+  seriesId: string,
+  payload: SegmentationExportPayload
+) => {
+  const response = await axios.post(`${getSegmentationUrl(seriesId)}/export`, payload);
+  return response.data;
+};
+
+export type {
+  SegmentationLoadResponse,
+  SegmentationSavePayload,
+  SegmentationExportPayload,
+};
+export { loadSegmentation, saveSegmentation, exportSegmentation };

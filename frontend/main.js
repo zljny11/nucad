@@ -56,6 +56,31 @@ ipcMain.handle('select-lesion-list-file', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('select-mask-export-path', async (event, defaultFileName) => {
+  const safeDefaultFileName =
+    typeof defaultFileName === 'string' && defaultFileName.trim()
+      ? defaultFileName.trim()
+      : 'doctor_mask.nii.gz';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出Mask',
+    defaultPath: safeDefaultFileName.endsWith('.nii.gz')
+      ? safeDefaultFileName
+      : `${safeDefaultFileName}.nii.gz`,
+    filters: [
+      { name: 'NIfTI Mask', extensions: ['nii.gz'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+
+  return result.filePath.endsWith('.nii.gz')
+    ? result.filePath
+    : `${result.filePath}.nii.gz`;
+});
+
 ipcMain.handle('select-algorithm-lesion-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '选择病灶列表文件',

@@ -11,6 +11,7 @@ import ImgShowHeader from "./ImgShowHeader";
 import ImgShow from "./ImgShow";
 import Report from "./Report";
 import EditableLesionPanel from "./EditableLesionPanel";
+import SeriesSelectorPanel from "./SeriesSelectorPanel";
 import {
   LESION_EDIT_CLOSE_TOPIC,
   LESION_EDIT_TOGGLE_TOPIC,
@@ -56,10 +57,11 @@ const ImgPage: React.FC = () => {
         <div
           className={
             lesionEditPanelVisible
-              ? "imgShowBody withEditableLesions"
-              : "imgShowBody"
+              ? "imgShowBody withSeriesSelector withEditableLesions"
+              : "imgShowBody withSeriesSelector"
           }
         >
+          <SeriesSelectorPanel />
           <ImgShow volumeIds={volumeIds} />
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>

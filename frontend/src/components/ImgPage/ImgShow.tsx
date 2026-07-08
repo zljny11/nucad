@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useContext } from "react";
 import { useAppSelector } from "../../redux/hooks";
 import PubSub from "pubsub-js";
 import ImgPageContext from "./functions/ImgPageContext";
+import { safeWindowRequire } from "../../utils/electron";
 import {
   RenderingEngine,
   Types,
@@ -21,6 +22,8 @@ import {
 } from "./functions/helpers";
 import {
   VolumeToolGroup,
+  SQUARE_BRUSH_ERASE_STRATEGY,
+  SQUARE_BRUSH_FILL_STRATEGY,
   setUpCameraSynchronizers,
   removeCameraSynchronizers,
   setToolPassiveFun,
@@ -29,6 +32,8 @@ import { renderingEngineId, viewportIds } from "./functions/getConstant";
 import loadImages from "./functions/loadImages";
 import {
   MASK_BRUSH_SIZE_TOPIC,
+  MASK_BRUSH_SHAPE_TOPIC,
+  MASK_EXPORT_TOPIC,
   MASK_REDO_TOPIC,
   MASK_SAVE_TOPIC,
   MASK_SET_MODE_TOPIC,
@@ -37,8 +42,10 @@ import {
   MASK_UNDO_TOPIC,
 } from "./functions/maskEvents";
 import {
+  exportSegmentation,
   loadSegmentation,
   saveSegmentation,
+  SegmentationSavePayload,
 } from "./functions/segmentationApi";
 // import axios from "axios";
 
@@ -56,9 +63,12 @@ const { MouseBindings, Events: CsToolsEvents, SegmentationRepresentations } =
   csToolsEnums;
 const { setBrushSizeForToolGroup } = utilities.segmentation;
 const SEGMENTATION_VOLUME_PREFIX = "NUCAD_SEGMENTATION_VOLUME";
-const SEGMENTATION_ID_PREFIX = "NUCAD_SEGMENTATION";
 const BRUSH_STRATEGY = "FILL_INSIDE_CIRCLE";
 const ERASE_STRATEGY = "ERASE_INSIDE_CIRCLE";
+const DEFAULT_MASK_BRUSH_SIZE = 8;
+type BrushShape = "circle" | "square";
+const electron = safeWindowRequire ? safeWindowRequire("electron") : null;
+const ipcRenderer = electron?.ipcRenderer;
 
 let renderingEngine: RenderingEngine,
   elements: HTMLCollectionOf<Element>,
@@ -78,6 +88,7 @@ interface MaskToolbarStatePayload {
   canUndo: boolean;
   canRedo: boolean;
   mode: "none" | "brush" | "erase";
+  brushShape: BrushShape;
 }
 
 interface MaskSessionState {
@@ -91,6 +102,7 @@ interface MaskSessionState {
   message: string;
   mode: MaskToolbarStatePayload["mode"];
   brushSize: number;
+  brushShape: BrushShape;
   dirty: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -119,7 +131,8 @@ const createInitialMaskSessionState = (): MaskSessionState => ({
   source: "none",
   message: "Mask not initialized",
   mode: "none",
-  brushSize: 25,
+  brushSize: DEFAULT_MASK_BRUSH_SIZE,
+  brushShape: "circle",
   dirty: false,
   canUndo: false,
   canRedo: false,
@@ -157,6 +170,29 @@ const uint8ArrayToBase64 = (data: Uint8Array) => {
 };
 
 const cloneScalarData = (data: Uint8Array) => new Uint8Array(data);
+
+const getEffectiveOutputPath = (outputPath: string, inputPath: string) => {
+  const trimmedOutputPath = String(outputPath || "").trim();
+
+  if (trimmedOutputPath) {
+    return trimmedOutputPath;
+  }
+
+  const normalizedInputPath = String(inputPath || "").trim();
+  const pathMarkers = [
+    { input: "/config/input/", output: "/config/output/" },
+    { input: "\\config\\input\\", output: "\\config\\output\\" },
+  ];
+  const matchedMarker = pathMarkers.find((marker) =>
+    normalizedInputPath.includes(marker.input)
+  );
+
+  if (matchedMarker) {
+    return normalizedInputPath.replace(matchedMarker.input, matchedMarker.output);
+  }
+
+  return "";
+};
 
 const getViewportOrThrow = (viewportId: string) => {
   const viewport = renderingEngine.getViewport(viewportId) as Types.IVolumeViewport;
@@ -227,7 +263,8 @@ const initAndGetImageIds = async (
 ): Promise<Record<string, any>[]> => {
   await initDemo();
   renderingEngine =
-    getRenderingEngine(renderingEngineId) || new RenderingEngine(renderingEngineId);
+    (getRenderingEngine(renderingEngineId) as RenderingEngine) ||
+    new RenderingEngine(renderingEngineId);
   elements = document.getElementsByClassName("viewport");
 
   /* const axiosResult = await axios.post("http://localhost:4001/getPath", {
@@ -448,6 +485,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
   const { seriesId, pname, scanTime, pID, inputPath, outputPath, pflag } =
     patientInfo;
+  const effectiveOutputPath = getEffectiveOutputPath(outputPath, inputPath);
   const { volumeLoaded } = useContext(ImgPageContext);
   const { volumeIds, enableMaskEditing = false } = props;
   const showLoadingProgress = !enableMaskEditing;
@@ -508,6 +546,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       canUndo: maskSession.canUndo,
       canRedo: maskSession.canRedo,
       mode: maskSession.mode,
+      brushShape: maskSession.brushShape,
     };
 
     PubSub.publish(MASK_STATE_TOPIC, payload);
@@ -671,20 +710,20 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     if (!maskSession.pendingHistory) {
-      maskSession.undoStack.push(cloneScalarData(maskSession.committedSnapshot));
+      maskSession.undoStack.push(maskSession.committedSnapshot);
       maskSession.redoStack = [];
       maskSession.pendingHistory = true;
+      updateMaskState({
+        canUndo: true,
+        canRedo: false,
+      });
     }
 
     if (maskSession.historyTimer) {
       clearTimeout(maskSession.historyTimer);
     }
 
-    maskSession.historyTimer = setTimeout(finalizeHistoryStep, 250);
-    updateMaskState({
-      canUndo: maskSession.undoStack.length > 0,
-      canRedo: maskSession.savedSnapshot !== null,
-    });
+    maskSession.historyTimer = setTimeout(finalizeHistoryStep, 500);
   };
 
   const initializeSegmentation = async () => {
@@ -693,11 +732,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     setMaskLoadingProgress(22, "Initializing Mask...");
-    if (pflag === "2" || pflag === "6" || !volumeIds.length) {
+    if (!volumeIds.length) {
       updateMaskState({
         ready: false,
         source: "none",
-        message: pflag === "6" ? "本地导入病例未加载算法Mask" : "当前模式暂不支持Mask",
+        message: "当前模式暂不支持Mask",
       });
       finishMaskLoadingProgress();
       return;
@@ -722,10 +761,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     let source: MaskToolbarStatePayload["source"] = "empty";
     let message = "未找到算法Mask，当前使用空白Mask";
 
-    if (outputPath) {
+    if (effectiveOutputPath) {
       try {
         setMaskLoadingProgress(45, "Loading saved segmentation...");
-        const response = await loadSegmentation(seriesId, outputPath);
+        const response = await loadSegmentation(seriesId, effectiveOutputPath);
         setMaskLoadingProgress(62, "Preparing segmentation data...");
 
         if (
@@ -775,8 +814,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     setMaskLoadingProgress(88, "Creating editable overlay...");
     const runtimeSuffix = `${seriesId}:${Date.now()}`;
-    const segmentationId = `${SEGMENTATION_ID_PREFIX}:${runtimeSuffix}`;
     const segmentationVolumeId = `${SEGMENTATION_VOLUME_PREFIX}:${runtimeSuffix}`;
+    const segmentationId = segmentationVolumeId;
     const segmentationVolume = await volumeLoader.createLocalVolume(
       {
         metadata: referencedVolume.metadata,
@@ -815,6 +854,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       segmentationRepresentationUID
     );
     segmentation.segmentIndex.setActiveSegmentIndex(segmentationId, 1);
+    setBrushSizeForToolGroup(VolumeToolGroup.id, DEFAULT_MASK_BRUSH_SIZE);
     setMaskLoadingProgress(100, "Mask ready");
 
     updateMaskState({
@@ -826,7 +866,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       visible: true,
       source,
       message,
-      brushSize: 25,
+      brushSize: DEFAULT_MASK_BRUSH_SIZE,
       dirty: false,
       canUndo: false,
       canRedo: false,
@@ -843,6 +883,33 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     window.setTimeout(finishMaskLoadingProgress, 350);
   };
 
+  const getBrushStrategy = (
+    mode: "brush" | "erase",
+    shape = maskSessionRef.current.brushShape
+  ) => {
+    if (shape === "square") {
+      return mode === "erase"
+        ? SQUARE_BRUSH_ERASE_STRATEGY
+        : SQUARE_BRUSH_FILL_STRATEGY;
+    }
+
+    return mode === "erase" ? ERASE_STRATEGY : BRUSH_STRATEGY;
+  };
+
+  const applyBrushShape = (shape: BrushShape) => {
+    const brushTool = (VolumeToolGroup as any).getToolInstance?.(
+      BrushTool.toolName
+    );
+
+    if (brushTool) {
+      brushTool.brushShape = shape;
+      brushTool.configuration.brushShape = shape;
+      brushTool.disableCursor?.();
+    }
+
+    renderingEngine?.render();
+  };
+
   const setMaskMode = (mode: "none" | "brush" | "erase") => {
     const maskSession = maskSessionRef.current;
 
@@ -857,16 +924,45 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     setToolPassiveFun(VolumeToolGroup);
-    VolumeToolGroup.setActiveStrategy(
+    applyBrushShape(maskSession.brushShape);
+    (VolumeToolGroup as any).setActiveStrategy(
       BrushTool.toolName,
-      mode === "erase" ? ERASE_STRATEGY : BRUSH_STRATEGY
+      getBrushStrategy(mode)
     );
     VolumeToolGroup.setToolActive(BrushTool.toolName, {
       bindings: [{ mouseButton: MouseBindings.Primary }],
     });
+    applyBrushShape(maskSession.brushShape);
+    (VolumeToolGroup as any).setActiveStrategy(
+      BrushTool.toolName,
+      getBrushStrategy(mode)
+    );
     updateMaskState({
       mode,
       message: mode === "erase" ? "Erase mode enabled" : "Brush mode enabled",
+    });
+  };
+
+  const setBrushShape = (shape: BrushShape) => {
+    const maskSession = maskSessionRef.current;
+
+    if (!maskSession.ready) {
+      return;
+    }
+
+    applyBrushShape(shape);
+
+    (VolumeToolGroup as any).setActiveStrategy(
+      BrushTool.toolName,
+      getBrushStrategy(
+        maskSession.mode === "erase" ? "erase" : "brush",
+        shape
+      )
+    );
+
+    updateMaskState({
+      brushShape: shape,
+      message: shape === "square" ? "Square brush enabled" : "Circle brush enabled",
     });
   };
 
@@ -882,23 +978,28 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const toggleMaskVisibility = () => {
     const maskSession = maskSessionRef.current;
 
-    if (!maskSession.ready) {
+    if (
+      !maskSession.ready ||
+      !maskSession.segmentationRepresentationUID ||
+      !getSegmentationVolume()
+    ) {
       return;
     }
 
     const nextVisibility = !maskSession.visible;
-    segmentation.config.visibility.setSegmentVisibility(
-      VolumeToolGroup.id,
-      maskSession.segmentationRepresentationUID,
-      1,
-      nextVisibility
-    );
     setMaskActorsVisibility(nextVisibility);
     renderingEngine?.render();
     updateMaskState({
       visible: nextVisibility,
       message: nextVisibility ? "Mask visible" : "Mask hidden",
     });
+
+    if (nextVisibility) {
+      window.setTimeout(() => {
+        setMaskActorsVisibility(true);
+        renderingEngine?.render();
+      }, 0);
+    }
   };
 
   const changeBrushSize = (delta: number) => {
@@ -969,12 +1070,43 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
   };
 
-  const saveCurrentMask = async () => {
+  const getCurrentMaskPayload = (): SegmentationSavePayload | null => {
     const maskSession = maskSessionRef.current;
     const segmentationVolume = getSegmentationVolume();
     const referencedVolume = cache.getVolume(maskSession.referencedVolumeId);
 
-    if (!maskSession.ready || !segmentationVolume || !referencedVolume || !outputPath) {
+    if (!maskSession.ready || !segmentationVolume || !referencedVolume) {
+      return null;
+    }
+
+    const scalarData = segmentationVolume.getScalarData() as Uint8Array;
+
+    return {
+      outputPath: effectiveOutputPath,
+      dimensions: [
+        referencedVolume.dimensions[0],
+        referencedVolume.dimensions[1],
+        referencedVolume.dimensions[2],
+      ],
+      spacing: [
+        referencedVolume.spacing[0],
+        referencedVolume.spacing[1],
+        referencedVolume.spacing[2],
+      ],
+      origin: [
+        referencedVolume.origin[0],
+        referencedVolume.origin[1],
+        referencedVolume.origin[2],
+      ],
+      direction: Array.from(referencedVolume.direction),
+      scalarDataBase64: uint8ArrayToBase64(scalarData),
+    };
+  };
+
+  const saveCurrentMask = async () => {
+    const payload = getCurrentMaskPayload();
+
+    if (!payload || !effectiveOutputPath) {
       updateMaskState({
         message: "Missing information required to save the mask",
       });
@@ -982,27 +1114,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     try {
-      const scalarData = segmentationVolume.getScalarData() as Uint8Array;
-      await saveSegmentation(seriesId, {
-        outputPath,
-        dimensions: [
-          referencedVolume.dimensions[0],
-          referencedVolume.dimensions[1],
-          referencedVolume.dimensions[2],
-        ],
-        spacing: [
-          referencedVolume.spacing[0],
-          referencedVolume.spacing[1],
-          referencedVolume.spacing[2],
-        ],
-        origin: [
-          referencedVolume.origin[0],
-          referencedVolume.origin[1],
-          referencedVolume.origin[2],
-        ],
-        direction: Array.from(referencedVolume.direction),
-        scalarDataBase64: uint8ArrayToBase64(scalarData),
-      });
+      const result = await saveSegmentation(seriesId, payload);
+      const scalarData = base64ToUint8Array(payload.scalarDataBase64);
       updateMaskState({
         dirty: false,
         source: "doctor",
@@ -1014,12 +1127,58 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         canRedo: false,
         message:
           scalarData.some((value) => value > 0)
-            ? "Mask saved as doctor revision"
-            : "Saved a blank mask for a confirmed negative result",
+            ? `Mask saved as doctor revision: ${result.path || "doctor_mask.nii.gz"}`
+            : `Saved a blank mask: ${result.path || "doctor_mask.nii.gz"}`,
       });
     } catch (error) {
       updateMaskState({
         message: "Mask save failed",
+      });
+    }
+  };
+
+  const exportCurrentMask = async () => {
+    const payload = getCurrentMaskPayload();
+
+    if (!payload) {
+      updateMaskState({
+        message: "Missing information required to export the mask",
+      });
+      return;
+    }
+
+    if (!ipcRenderer) {
+      updateMaskState({
+        message: "当前环境无法打开Mask导出窗口",
+      });
+      return;
+    }
+
+    try {
+      const defaultFileName = `${seriesId || "doctor"}_doctor_mask.nii.gz`;
+      const exportPath = await ipcRenderer.invoke(
+        "select-mask-export-path",
+        defaultFileName
+      );
+
+      if (!exportPath) {
+        updateMaskState({
+          message: "已取消导出Mask",
+        });
+        return;
+      }
+
+      const result = await exportSegmentation(seriesId, {
+        ...payload,
+        exportPath,
+      });
+
+      updateMaskState({
+        message: `Mask exported: ${result.path || exportPath}`,
+      });
+    } catch (error) {
+      updateMaskState({
+        message: "Mask export failed",
       });
     }
   };
@@ -1079,7 +1238,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     volumes = initAndGetImageIds(
       renderingEngineId,
       inputPath,
-      outputPath,
+      effectiveOutputPath,
       volumeIds,
       pflag
     );
@@ -1177,6 +1336,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     const brushSizeToken = PubSub.subscribe(MASK_BRUSH_SIZE_TOPIC, (_, delta) => {
       changeBrushSize(delta as number);
     });
+    const brushShapeToken = PubSub.subscribe(MASK_BRUSH_SHAPE_TOPIC, (_, shape) => {
+      setBrushShape(shape as BrushShape);
+    });
     const undoToken = PubSub.subscribe(MASK_UNDO_TOPIC, () => {
       undoMaskEdit();
     });
@@ -1185,6 +1347,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
     const saveToken = PubSub.subscribe(MASK_SAVE_TOPIC, () => {
       saveCurrentMask();
+    });
+    const exportToken = PubSub.subscribe(MASK_EXPORT_TOPIC, () => {
+      exportCurrentMask();
     });
     const segmentationModifiedHandler = (event) => {
       if (
@@ -1207,9 +1372,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       PubSub.unsubscribe(modeToken);
       PubSub.unsubscribe(visibilityToken);
       PubSub.unsubscribe(brushSizeToken);
+      PubSub.unsubscribe(brushShapeToken);
       PubSub.unsubscribe(undoToken);
       PubSub.unsubscribe(redoToken);
       PubSub.unsubscribe(saveToken);
+      PubSub.unsubscribe(exportToken);
       brushCursorHandlers.forEach(({ element, enter, leave }) => {
         element.removeEventListener("pointerenter", enter);
         element.removeEventListener("pointerleave", leave);
@@ -1288,9 +1455,16 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
 
     let frameId = 0;
+    let resizeTimer: number | null = null;
     const queueResize = () => {
       window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(resizeViewports);
+      if (resizeTimer) {
+        window.clearTimeout(resizeTimer);
+      }
+
+      resizeTimer = window.setTimeout(() => {
+        frameId = window.requestAnimationFrame(resizeViewports);
+      }, 80);
     };
 
     const resizeObserver = new ResizeObserver(queueResize);
@@ -1299,6 +1473,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      if (resizeTimer) {
+        window.clearTimeout(resizeTimer);
+      }
       resizeObserver.disconnect();
       window.removeEventListener("resize", queueResize);
     };

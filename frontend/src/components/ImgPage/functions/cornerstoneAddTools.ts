@@ -1,8 +1,12 @@
 import {
   Enums as CoreEnums,
+  getEnabledElement,
   getEnabledElementByIds,
+  utilities as csUtils,
 } from "@cornerstonejs/core";
 import * as cornerstoneTools from "@cornerstonejs/tools";
+import { fillInsideRectangle } from "@cornerstonejs/tools/dist/esm/tools/segmentation/strategies/fillRectangle";
+import { eraseInsideRectangle } from "@cornerstonejs/tools/dist/esm/tools/segmentation/strategies/eraseRectangle";
 import { renderingEngineId, viewportIds } from "./getConstant";
 
 const {
@@ -23,6 +27,8 @@ const { createCameraPositionSynchronizer, createVOISynchronizer } =
 const { getSynchronizer } = SynchronizerManager;
 
 const ZOOM_SENSITIVITY = 0.65;
+const SQUARE_BRUSH_FILL_STRATEGY = "FILL_INSIDE_SQUARE";
+const SQUARE_BRUSH_ERASE_STRATEGY = "ERASE_INSIDE_SQUARE";
 
 class NuCadZoomTool extends ZoomTool {
   static toolName = "NuCadZoom";
@@ -59,6 +65,45 @@ class NuCadZoomTool extends ZoomTool {
 
   _pinchCallback(evt: any) {
     this.withScaledZoomDelta(evt, () => super._pinchCallback(evt));
+  }
+}
+
+class NuCadWindowLevelTool extends WindowLevelTool {
+  static toolName = "NuCadWindowLevel";
+
+  getPTScaledNewRange({
+    deltaPointsCanvas,
+    lower,
+    upper,
+    clientHeight,
+    viewport,
+    volumeId,
+    isPreScaled,
+  }: any) {
+    const multiplier = isPreScaled
+      ? 5 / clientHeight
+      : (this as any)._getMultiplierFromDynamicRange(viewport, volumeId) || 4;
+    const wwDelta = deltaPointsCanvas[0] * multiplier;
+    const wcDelta = deltaPointsCanvas[1] * multiplier;
+    let { windowWidth, windowCenter } = csUtils.windowLevel.toWindowLevel(
+      lower,
+      upper
+    );
+
+    windowWidth = Math.max(windowWidth + wwDelta, isPreScaled ? 0.1 : 1);
+    windowCenter += wcDelta;
+
+    const nextRange = csUtils.windowLevel.toLowHighRange(
+      windowWidth,
+      windowCenter
+    );
+
+    if (isPreScaled) {
+      nextRange.lower = Math.max(nextRange.lower, 0);
+      nextRange.upper = Math.max(nextRange.upper, 0.1);
+    }
+
+    return nextRange;
   }
 }
 
@@ -203,13 +248,176 @@ class NuCadCrosshairsTool extends CrosshairsTool {
   }
 }
 
+class NuCadBrushTool extends BrushTool {
+  static toolName = BrushTool.toolName;
+
+  constructor(...args: any[]) {
+    super(...args);
+
+    this.configuration.brushSize = 8;
+    this.configuration.brushShape = "circle";
+    (this as any).brushShape = "circle";
+    this.configuration.strategies[SQUARE_BRUSH_FILL_STRATEGY] =
+      fillInsideRectangle;
+    this.configuration.strategies[SQUARE_BRUSH_ERASE_STRATEGY] =
+      eraseInsideRectangle;
+
+    const originalCalculateCursor = (this as any)._calculateCursor.bind(this);
+    const originalRenderAnnotation = this.renderAnnotation.bind(this);
+    const originalPreMouseDownCallback = this.preMouseDownCallback?.bind(this);
+    const originalDragCallback = (this as any)._dragCallback?.bind(this);
+    const originalEndCallback = (this as any)._endCallback?.bind(this);
+    let lastDragTime = 0;
+    let hasDrawnDuringDrag = false;
+    let pendingDragEvent: any = null;
+
+    (this as any)._calculateCursor = (
+      element: HTMLDivElement,
+      centerCanvas: [number, number]
+    ) => {
+      if ((this as any).brushShape !== "square") {
+        return originalCalculateCursor(element, centerCanvas);
+      }
+
+      const enabledElement = getEnabledElement(element);
+      const { viewport } = enabledElement;
+      const { canvasToWorld } = viewport;
+      const { brushSize } = this.configuration;
+      const halfSide = brushSize / Math.sqrt(2);
+      const topLeftCanvas = [
+        centerCanvas[0] - halfSide,
+        centerCanvas[1] - halfSide,
+      ] as [number, number];
+      const topRightCanvas = [
+        centerCanvas[0] + halfSide,
+        centerCanvas[1] - halfSide,
+      ] as [number, number];
+      const bottomRightCanvas = [
+        centerCanvas[0] + halfSide,
+        centerCanvas[1] + halfSide,
+      ] as [number, number];
+      const bottomLeftCanvas = [
+        centerCanvas[0] - halfSide,
+        centerCanvas[1] + halfSide,
+      ] as [number, number];
+      const { brushCursor } = (this as any)._hoverData;
+      const { data } = brushCursor;
+
+      if (data.handles === undefined) {
+        data.handles = {};
+      }
+
+      data.handles.points = [
+        canvasToWorld(topLeftCanvas),
+        canvasToWorld(topRightCanvas),
+        canvasToWorld(bottomRightCanvas),
+        canvasToWorld(bottomLeftCanvas),
+      ];
+      data.invalidated = false;
+    };
+
+    this.renderAnnotation = (enabledElement: any, svgDrawingHelper: any) => {
+      if ((this as any).brushShape !== "square") {
+        return originalRenderAnnotation(enabledElement, svgDrawingHelper);
+      }
+
+      const hoverData = (this as any)._hoverData;
+
+      if (!hoverData) {
+        return;
+      }
+
+      const { viewport } = enabledElement;
+      const viewportIdsToRender = hoverData.viewportIdsToRender;
+
+      if (!viewportIdsToRender.includes(viewport.id)) {
+        return;
+      }
+
+      const brushCursor = hoverData.brushCursor;
+
+      if (brushCursor.data.invalidated === true) {
+        const { centerCanvas } = hoverData;
+        const { element } = viewport;
+        (this as any)._calculateCursor(element, centerCanvas);
+      }
+
+      const toolMetadata = brushCursor.metadata;
+      const annotationUID = toolMetadata.brushCursorUID;
+      const data = brushCursor.data;
+      const { points } = data.handles;
+      const canvasCoordinates = points.map((point: any) =>
+        viewport.worldToCanvas(point)
+      );
+      const xs = canvasCoordinates.map((point: [number, number]) => point[0]);
+      const ys = canvasCoordinates.map((point: [number, number]) => point[1]);
+      const topLeft = [Math.min(...xs), Math.min(...ys)] as [number, number];
+      const bottomRight = [Math.max(...xs), Math.max(...ys)] as [number, number];
+      const color = `rgb(${toolMetadata.segmentColor.slice(0, 3)})`;
+
+      if (!viewport.getRenderingEngine()) {
+        console.warn("Rendering Engine has been destroyed");
+        return;
+      }
+
+      (cornerstoneTools as any).drawing.drawRect(
+        svgDrawingHelper,
+        annotationUID,
+        "square-brush",
+        topLeft,
+        bottomRight,
+        { color }
+      );
+    };
+
+    if (originalPreMouseDownCallback) {
+      this.preMouseDownCallback = (evt: any): boolean => {
+        lastDragTime = 0;
+        hasDrawnDuringDrag = false;
+        pendingDragEvent = null;
+        return originalPreMouseDownCallback(evt);
+      };
+    }
+
+    if (originalDragCallback) {
+      (this as any)._dragCallback = (evt: any): void => {
+        const now = performance.now();
+
+        if (hasDrawnDuringDrag && now - lastDragTime < 32) {
+          pendingDragEvent = evt;
+          return;
+        }
+
+        lastDragTime = now;
+        hasDrawnDuringDrag = true;
+        pendingDragEvent = null;
+        originalDragCallback(evt);
+      };
+    }
+
+    if (originalEndCallback) {
+      (this as any)._endCallback = (evt: any): void => {
+        if (pendingDragEvent) {
+          originalDragCallback(pendingDragEvent);
+          pendingDragEvent = null;
+        } else if (!hasDrawnDuringDrag) {
+          originalDragCallback(evt);
+        }
+
+        originalEndCallback(evt);
+        hasDrawnDuringDrag = false;
+      };
+    }
+  }
+}
+
 cornerstoneTools.addTool(StackScrollMouseWheelTool);
-cornerstoneTools.addTool(WindowLevelTool);
+cornerstoneTools.addTool(NuCadWindowLevelTool);
 cornerstoneTools.addTool(NuCadZoomTool);
 cornerstoneTools.addTool(PanTool);
 cornerstoneTools.addTool(NuCadDragProbeTool);
 cornerstoneTools.addTool(NuCadCrosshairsTool);
-cornerstoneTools.addTool(BrushTool);
+cornerstoneTools.addTool(NuCadBrushTool);
 cornerstoneTools.addTool(SegmentationDisplayTool);
 
 const VolumeToolGroupId = "VOLUMETOOLGROUP_ID";
@@ -257,7 +465,7 @@ function getReferenceLineSlabThicknessControlsOn(viewportId: string) {
 }
 
 function setToolPassiveFun(ToolGroup: cornerstoneTools.Types.IToolGroup) {
-  ToolGroup.setToolPassive(WindowLevelTool.toolName);
+  ToolGroup.setToolPassive(NuCadWindowLevelTool.toolName);
   ToolGroup.setToolPassive(NuCadZoomTool.toolName);
   ToolGroup.setToolPassive(PanTool.toolName);
   ToolGroup.setToolPassive(NuCadDragProbeTool.toolName);
@@ -265,7 +473,7 @@ function setToolPassiveFun(ToolGroup: cornerstoneTools.Types.IToolGroup) {
 }
 
 VolumeToolGroup.addTool(StackScrollMouseWheelTool.toolName);
-VolumeToolGroup.addTool(WindowLevelTool.toolName);
+VolumeToolGroup.addTool(NuCadWindowLevelTool.toolName);
 VolumeToolGroup.addTool(NuCadZoomTool.toolName);
 VolumeToolGroup.addTool(PanTool.toolName);
 VolumeToolGroup.addTool(NuCadDragProbeTool.toolName);
@@ -354,7 +562,7 @@ const setUpVoiSynchronizers = () => {
     in_out_VoiSynchronizerId
   ) as cornerstoneTools.Synchronizer;
   if (!in_out_VoiSynchronizer) {
-    in_out_VoiSynchronizer = createVOISynchronizer(in_out_VoiSynchronizerId, {
+    in_out_VoiSynchronizer = (createVOISynchronizer as any)(in_out_VoiSynchronizerId, {
       syncInvertState: true,
       syncColormap: true,
     });
@@ -380,8 +588,11 @@ const removeVoiSynchronizers = () => {
 
 export {
   VolumeToolGroup,
+  NuCadWindowLevelTool,
   NuCadZoomTool,
   NuCadDragProbeTool,
+  SQUARE_BRUSH_FILL_STRATEGY,
+  SQUARE_BRUSH_ERASE_STRATEGY,
   setUpCameraSynchronizers,
   removeCameraSynchronizers,
   setUpVoiSynchronizers,

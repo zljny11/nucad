@@ -5,6 +5,7 @@ import { getRenderingEngine } from "@cornerstonejs/core";
 import * as cornerstoneTools from "@cornerstonejs/tools";
 import {
   VolumeToolGroup,
+  NuCadWindowLevelTool,
   NuCadZoomTool,
   NuCadDragProbeTool,
   setUpVoiSynchronizers,
@@ -14,7 +15,9 @@ import {
 import ImgPageContext from "./functions/ImgPageContext";
 import { renderingEngineId, viewportIds } from "./functions/getConstant";
 import {
+  MASK_BRUSH_SHAPE_TOPIC,
   MASK_BRUSH_SIZE_TOPIC,
+  MASK_EXPORT_TOPIC,
   MASK_REDO_TOPIC,
   MASK_SAVE_TOPIC,
   MASK_SET_MODE_TOPIC,
@@ -27,7 +30,6 @@ import logo from "../../images/logonamegrey.png";
 
 const {
   Enums: csToolsEnums,
-  WindowLevelTool,
   PanTool,
   CrosshairsTool,
   BrushTool,
@@ -40,6 +42,7 @@ interface MaskToolbarState {
   source: "doctor" | "algorithm" | "empty" | "none" | "error";
   message: string;
   brushSize: number;
+  brushShape: "circle" | "square";
   dirty: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -51,7 +54,8 @@ const initialMaskState: MaskToolbarState = {
   visible: true,
   source: "none",
   message: "Mask未初始化",
-  brushSize: 25,
+  brushSize: 8,
+  brushShape: "circle",
   dirty: false,
   canUndo: false,
   canRedo: false,
@@ -59,7 +63,7 @@ const initialMaskState: MaskToolbarState = {
 };
 
 let probeCursorHidden = false;
-let probeCursorHideTimer: ReturnType<typeof window.setInterval> | null = null;
+let probeCursorHideTimer: number | null = null;
 const hiddenCursor =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3C/svg%3E\") 0 0, none";
 
@@ -144,6 +148,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
   const [voiSync, setVoiSync] = useState(false);
   const [crosshairsActive, setCrosshairsActive] = useState(false);
   const [maskState, setMaskState] = useState<MaskToolbarState>(initialMaskState);
+  const [brushMenuOpen, setBrushMenuOpen] = useState(false);
 
   useEffect(() => {
     const token = PubSub.subscribe(MASK_STATE_TOPIC, (_, data) => {
@@ -189,7 +194,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     }
 
     if (curTool === toolName) {
-      if (toolName === "WindowLevelTool" && voiSync) {
+      if (toolName === NuCadWindowLevelTool.toolName && voiSync) {
         removeVoiSynchronizers();
         setVoiSync(false);
       }
@@ -200,7 +205,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       return;
     }
 
-    if (toolName !== "WindowLevelTool" && voiSync) setVoiSyncFun();
+    if (toolName !== NuCadWindowLevelTool.toolName && voiSync) setVoiSyncFun();
     disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
     PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
@@ -233,8 +238,8 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           ],
         });
         break;
-      case "WindowLevelTool":
-        VolumeToolGroup.setToolActive(WindowLevelTool.toolName, {
+      case NuCadWindowLevelTool.toolName:
+        VolumeToolGroup.setToolActive(NuCadWindowLevelTool.toolName, {
           bindings: [
             {
               mouseButton: MouseBindings.Primary,
@@ -248,12 +253,12 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     setCurTool(toolName);
   };
 
-  const setMaskMode = (mode: "brush" | "erase") => {
+  const setMaskMode = (mode: "brush" | "erase", forceActive = false) => {
     if (!maskState.ready) {
       return;
     }
 
-    if (maskState.mode === mode) {
+    if (maskState.mode === mode && !forceActive) {
       PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
       setCurTool("");
       return;
@@ -267,6 +272,24 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     setProbeCursorHidden(false);
     PubSub.publishSync(MASK_SET_MODE_TOPIC, mode);
     setCurTool(BrushTool.toolName);
+  };
+
+  const showBrushMenu = () => {
+    if (!maskState.ready) {
+      return;
+    }
+
+    setBrushMenuOpen((open) => !open);
+  };
+
+  const selectBrushShape = (shape: "circle" | "square") => {
+    if (!maskState.ready) {
+      return;
+    }
+
+    PubSub.publishSync(MASK_BRUSH_SHAPE_TOPIC, shape);
+    setMaskMode("brush", true);
+    setBrushMenuOpen(false);
   };
 
   const changeBrushSize = (delta: number) => {
@@ -287,14 +310,14 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       setToolPassiveFun(VolumeToolGroup);
       setProbeCursorHidden(false);
       PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
-      VolumeToolGroup.setToolActive(WindowLevelTool.toolName, {
+      VolumeToolGroup.setToolActive(NuCadWindowLevelTool.toolName, {
         bindings: [
           {
             mouseButton: MouseBindings.Primary,
           },
         ],
       });
-      setCurTool("WindowLevelTool");
+      setCurTool(NuCadWindowLevelTool.toolName);
       setUpVoiSynchronizers();
     }
     setVoiSync(!voiSync);
@@ -406,11 +429,13 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
         <div
           className="buttonContainer"
-          onClick={() => handleLeftClicked("WindowLevelTool")}
+          onClick={() => handleLeftClicked(NuCadWindowLevelTool.toolName)}
         >
           <div
             className={
-              curTool === "WindowLevelTool" ? "chosenIconfont" : "NewIconfont"
+              curTool === NuCadWindowLevelTool.toolName
+                ? "chosenIconfont"
+                : "NewIconfont"
             }
           >
             &#xe685;
@@ -454,16 +479,20 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
           <>
             <div
               className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-              onClick={() => PubSub.publish(MASK_TOGGLE_VISIBILITY_TOPIC)}
+              onClick={() => maskState.ready && PubSub.publish(MASK_TOGGLE_VISIBILITY_TOPIC)}
             >
-              <div className={maskState.visible ? "chosenIconfont" : "NewIconfont"}>
+              <div className={maskState.visible ? "NewIconfont" : "chosenIconfont"}>
                 &#xe8da;
               </div>
               <div>{maskState.visible ? "隐藏Mask" : "显示Mask"}</div>
             </div>
             <div
-              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-              onClick={() => setMaskMode("brush")}
+              className={
+                maskState.ready
+                  ? "buttonContainer brushToolContainer"
+                  : "buttonContainer brushToolContainer disabledAction"
+              }
+              onClick={showBrushMenu}
             >
               <div
                 className={
@@ -473,6 +502,37 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
                 &#9998;
               </div>
               <div>画刷</div>
+              {brushMenuOpen ? (
+                <div
+                  className="brushShapeMenu"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <button
+                    className={
+                      maskState.brushShape === "circle"
+                        ? "brushShapeOption active"
+                        : "brushShapeOption"
+                    }
+                    onClick={() => selectBrushShape("circle")}
+                    type="button"
+                  >
+                    <span className="circleBrushIcon" />
+                    圆形画刷
+                  </button>
+                  <button
+                    className={
+                      maskState.brushShape === "square"
+                        ? "brushShapeOption active"
+                        : "brushShapeOption"
+                    }
+                    onClick={() => selectBrushShape("square")}
+                    type="button"
+                  >
+                    <span className="squareBrushIcon" />
+                    方形画刷
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div
               className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
@@ -572,6 +632,15 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
               </div>
               <div>保存Mask</div>
             </div>
+            <div
+              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
+              onClick={() => maskState.ready && PubSub.publish(MASK_EXPORT_TOPIC)}
+            >
+              <div className="NewIconfont">
+                &#xe8a4;
+              </div>
+              <div>导出Mask</div>
+            </div>
           </>
         ) : (
           <div className="buttonContainer" onClick={showLesionEditList}>
@@ -587,26 +656,9 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
         ) : null}
       </div>
 
-      {isEditor ? <div className="maskStatusFloating">
-        NuCAD
-        <div className="maskStatus">
-          <div>
-            Mask:
-            {maskState.source === "doctor"
-              ? "医生版"
-              : maskState.source === "algorithm"
-              ? "算法版"
-              : maskState.source === "empty"
-              ? "空白"
-              : "未加载"}
-          </div>
-          <div>
-            半径: {maskState.brushSize}
-            {maskState.dirty ? " | 未保存" : ""}
-          </div>
-          <div>{maskState.message}</div>
-        </div>
-      </div> : null}
+      {isEditor ? (
+        <div className="maskRadiusFloating">半径: {maskState.brushSize}</div>
+      ) : null}
     </div>
   );
 };
