@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useContext } from "react";
 import { useAppSelector } from "../../redux/hooks";
 import PubSub from "pubsub-js";
 import ImgPageContext from "./functions/ImgPageContext";
-import { safeWindowRequire } from "../../utils/electron";
 import {
   RenderingEngine,
   Types,
@@ -36,6 +35,8 @@ import {
   MASK_BRUSH_SIZE_TOPIC,
   MASK_BRUSH_SHAPE_TOPIC,
   MASK_EXPORT_TOPIC,
+  MASK_FOCUS_SEGMENT_TOPIC,
+  MASK_PERSISTED_TOPIC,
   MASK_RELOAD_TOPIC,
   MASK_REDO_TOPIC,
   MASK_SAVE_TOPIC,
@@ -43,14 +44,14 @@ import {
   MASK_STATE_TOPIC,
   MASK_TOGGLE_VISIBILITY_TOPIC,
   MASK_UNDO_TOPIC,
-  MASK_VISIBLE_SEGMENTS_TOPIC,
 } from "./functions/maskEvents";
 import {
-  exportSegmentation,
   loadSegmentation,
   saveSegmentation,
   SegmentationSavePayload,
 } from "./functions/segmentationApi";
+import { safeWindowRequire } from "../../utils/electron";
+import type { LesionMaskStat } from "./functions/lesionReportCache";
 import type { SelectedSeries } from "./SeriesSelectorPanel";
 // import axios from "axios";
 
@@ -67,17 +68,21 @@ const { jumpToSlice } = utilities;
 const { MouseBindings, Events: CsToolsEvents, SegmentationRepresentations } =
   csToolsEnums;
 const { setBrushSizeForToolGroup } = utilities.segmentation;
+const ipcRenderer = safeWindowRequire
+  ? safeWindowRequire("electron").ipcRenderer
+  : null;
 const SEGMENTATION_VOLUME_PREFIX = "NUCAD_SEGMENTATION_VOLUME";
 const BRUSH_STRATEGY = "FILL_INSIDE_CIRCLE";
 const ERASE_STRATEGY = "ERASE_INSIDE_CIRCLE";
 const DEFAULT_MASK_BRUSH_SIZE = 8;
+const INITIAL_LESION_FOCUS_MAX_ATTEMPTS = 12;
+const INITIAL_LESION_FOCUS_RETRY_MS = 160;
+const INITIAL_LESION_FOCUS_SETTLE_REPLAYS = 4;
+const LESION_EDIT_FOCUS_STORAGE_KEY = "nucad:lesionEditFocus";
 type BrushShape = "circle" | "square";
 type MaskReloadPayload = {
   source?: "doctor" | "algorithm";
 };
-const electron = safeWindowRequire ? safeWindowRequire("electron") : null;
-const ipcRenderer = electron?.ipcRenderer;
-
 let renderingEngine: RenderingEngine,
   elements: HTMLCollectionOf<Element>,
   volumes: Promise<Record<string, any>[]>,
@@ -179,10 +184,89 @@ const uint8ArrayToBase64 = (data: Uint8Array) => {
 
 const cloneScalarData = (data: Uint8Array) => new Uint8Array(data);
 
+const clampIndex = (value: number, size: number) => {
+  if (!Number.isFinite(value) || size <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.max(Math.round(value), 0), size - 1);
+};
+
+const jumpViewportToWorld = (
+  viewport: Types.IVolumeViewport | undefined,
+  jumpWorld: Types.Point3
+) => {
+  if (!viewport || !jumpWorld) {
+    return;
+  }
+
+  const camera = viewport.getCamera();
+  const focalPoint = camera?.focalPoint;
+  const position = camera?.position;
+  const normal = camera?.viewPlaneNormal;
+
+  if (!focalPoint || !position || !normal) {
+    return;
+  }
+
+  const delta: Types.Point3 = [
+    jumpWorld[0] - focalPoint[0],
+    jumpWorld[1] - focalPoint[1],
+    jumpWorld[2] - focalPoint[2],
+  ];
+  const dot =
+    delta[0] * normal[0] + delta[1] * normal[1] + delta[2] * normal[2];
+  const projectedDelta: Types.Point3 = [
+    normal[0] * dot,
+    normal[1] * dot,
+    normal[2] * dot,
+  ];
+
+  if (
+    Math.abs(projectedDelta[0]) <= 1e-3 &&
+    Math.abs(projectedDelta[1]) <= 1e-3 &&
+    Math.abs(projectedDelta[2]) <= 1e-3
+  ) {
+    return;
+  }
+
+  viewport.setCamera({
+    focalPoint: [
+      focalPoint[0] + projectedDelta[0],
+      focalPoint[1] + projectedDelta[1],
+      focalPoint[2] + projectedDelta[2],
+    ],
+    position: [
+      position[0] + projectedDelta[0],
+      position[1] + projectedDelta[1],
+      position[2] + projectedDelta[2],
+    ],
+  });
+  viewport.render();
+};
+
 const parseIndexList = (value: string | null) =>
   (value || "")
     .match(/\d+(\.\d+)?/g)
     ?.map((imgIndex) => Math.round(parseFloat(imgIndex))) || [];
+
+const getStoredInitialLesionFocus = () => {
+  try {
+    const value = window.sessionStorage.getItem(LESION_EDIT_FOCUS_STORAGE_KEY);
+    if (!value) {
+      return { lesionId: "", lesionLabel: NaN, imageIndexs: [] as number[] };
+    }
+
+    const parsedValue = JSON.parse(value);
+    return {
+      lesionId: parsedValue?.lesionId ? String(parsedValue.lesionId) : "",
+      lesionLabel: Number(parsedValue?.lesionLabel),
+      imageIndexs: parseIndexList(parsedValue?.imageIndexs || ""),
+    };
+  } catch (error) {
+    return { lesionId: "", lesionLabel: NaN, imageIndexs: [] as number[] };
+  }
+};
 
 const getViewportOrThrow = (viewportId: string) => {
   const viewport = renderingEngine.getViewport(viewportId) as Types.IVolumeViewport;
@@ -493,7 +577,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const { seriesId, pname, scanTime, pID, inputPath, outputPath, pflag } =
     patientInfo;
   const effectiveOutputPath = getEffectiveOutputPath(outputPath, inputPath);
-  const { selectedLesions, volumeLoaded } = useContext(ImgPageContext);
+  const { volumeLoaded } = useContext(ImgPageContext);
   const { volumeIds, enableMaskEditing = false, selectedSeries = null } = props;
   const ctVolumeIndex = !selectedSeries && pflag === "1" ? 2 : 1;
   const showLoadingProgress = !enableMaskEditing;
@@ -515,6 +599,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
   const loadTokenRef = useRef(0);
   const maskSessionRef = useRef<MaskSessionState>(createInitialMaskSessionState());
   const initialLesionFocusApplied = useRef(false);
+  const initialLesionFocusAttempts = useRef(0);
+  const initialLesionFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeLesionEditTargetRef = useRef({ lesionId: "", lesionLabel: "" });
   const pendingMaskReloadSource = useRef<"doctor" | "algorithm" | undefined>(
     undefined
   );
@@ -597,11 +684,130 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     }
   };
 
-  const jumpToImageIndexes = (imageIndexs: number[]) => {
-    if (!imageIndexs.length || !renderingEngine) {
+  const getSegmentCenterWorld = (segmentIndex: number): Types.Point3 | null => {
+    const maskSession = maskSessionRef.current;
+    const segmentationVolume = cache.getVolume(maskSession.segmentationVolumeId);
+
+    if (!segmentationVolume || !Number.isFinite(segmentIndex) || segmentIndex <= 0) {
+      return null;
+    }
+
+    const scalarData = segmentationVolume.getScalarData() as Uint8Array;
+    const dimensions = segmentationVolume.dimensions || [];
+    const imageData = segmentationVolume.imageData;
+
+    if (
+      !scalarData ||
+      !imageData?.indexToWorld ||
+      dimensions.length < 3 ||
+      !dimensions.every((value: number) => Number.isFinite(value) && value > 0)
+    ) {
+      return null;
+    }
+
+    const [dimX, dimY, dimZ] = dimensions as [number, number, number];
+    const targetValue = Math.round(segmentIndex);
+    const planeSize = dimX * dimY;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    let voxelCount = 0;
+
+    for (let flatIndex = 0; flatIndex < scalarData.length; flatIndex += 1) {
+      if (scalarData[flatIndex] !== targetValue) {
+        continue;
+      }
+
+      const z = Math.floor(flatIndex / planeSize);
+      const xyIndex = flatIndex - z * planeSize;
+      const y = Math.floor(xyIndex / dimX);
+      const x = xyIndex - y * dimX;
+
+      sumX += x;
+      sumY += y;
+      sumZ += z;
+      voxelCount += 1;
+    }
+
+    if (!voxelCount) {
+      return null;
+    }
+
+    return imageData.indexToWorld([
+      sumX / voxelCount,
+      sumY / voxelCount,
+      sumZ / voxelCount,
+    ]) as Types.Point3;
+  };
+
+  const syncSliceIndicatorsFromWorld = (worldPoint: Types.Point3) => {
+    const referencedVolume = cache.getVolume(maskSessionRef.current.referencedVolumeId);
+    const imageData = referencedVolume?.imageData;
+
+    if (!imageData?.worldToIndex) {
       return;
     }
 
+    const continuousIndex = imageData.worldToIndex(worldPoint) as Types.Point3;
+    const [dimX, dimY, dimZ] = referencedVolume.dimensions;
+    const indexX = clampIndex(continuousIndex[0], dimX);
+    const indexY = clampIndex(continuousIndex[1], dimY);
+    const indexZ = clampIndex(continuousIndex[2], dimZ);
+
+    setPET_AXIAL_Index(indexZ + 1);
+    setPET_CORONAL_Index(PET_CORONAL_Num - indexY + 1);
+    setPET_SAGITTAL_Index(indexX + 1);
+  };
+
+  const focusMaskSegment = (
+    segmentIndex: number,
+    options: { message?: string; fallbackImageIndexes?: number[] } = {}
+  ) => {
+    const nextSegmentIndex = Math.max(1, Math.round(segmentIndex));
+
+    setActiveMaskSegment(nextSegmentIndex, options.message ? { message: options.message } : {});
+
+    const centerWorld = getSegmentCenterWorld(nextSegmentIndex);
+    if (centerWorld) {
+      let focusedViewport = false;
+      viewportIds.forEach((viewportId, index) => {
+        if (index === 3) {
+          return;
+        }
+
+        const viewport = renderingEngine?.getViewport(viewportId) as Types.IVolumeViewport;
+        if (!viewport) {
+          return;
+        }
+
+        jumpViewportToWorld(viewport, centerWorld);
+        focusedViewport = true;
+      });
+
+      if (focusedViewport) {
+        syncSliceIndicatorsFromWorld(centerWorld);
+        renderingEngine?.render();
+        return true;
+      }
+    }
+
+    if (options.fallbackImageIndexes?.length) {
+      return jumpToImageIndexes(options.fallbackImageIndexes);
+    }
+
+    return false;
+  };
+
+  const jumpToImageIndexes = (imageIndexs: number[]) => {
+    if (
+      imageIndexs.length < 3 ||
+      !imageIndexs.every((imageIndex) => Number.isFinite(imageIndex)) ||
+      !renderingEngine
+    ) {
+      return false;
+    }
+
+    let jumped = false;
     viewportIds.forEach((viewportId, index) => {
       if (index === 3) {
         return;
@@ -616,6 +822,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         imageIndex:
           index === 1 ? PET_CORONAL_Num - imageIndexs[2 - index] : imageIndexs[2 - index],
       });
+      jumped = true;
 
       switch (index) {
         case 0:
@@ -631,28 +838,90 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
           break;
       }
     });
+
+    return jumped;
+  };
+
+  const clearInitialLesionFocusTimer = () => {
+    if (initialLesionFocusTimer.current) {
+      clearTimeout(initialLesionFocusTimer.current);
+      initialLesionFocusTimer.current = null;
+    }
   };
 
   const focusInitialLesionFromUrl = () => {
     if (!enableMaskEditing || initialLesionFocusApplied.current) {
-      return;
+      return true;
     }
 
     const params = new URLSearchParams(window.location.search);
-    const lesionLabel = Number(params.get("lesionLabel"));
-    const imageIndexs = parseIndexList(params.get("imageIndexs"));
+    const storedFocus = getStoredInitialLesionFocus();
+    const lesionId = params.get("lesionId") || storedFocus.lesionId || "";
+    const lesionLabelFromUrl = Number(params.get("lesionLabel"));
+    const imageIndexsFromUrl = parseIndexList(params.get("imageIndexs"));
+    const lesionLabel =
+      Number.isFinite(lesionLabelFromUrl) && lesionLabelFromUrl > 0
+        ? lesionLabelFromUrl
+        : storedFocus.lesionLabel;
+    const imageIndexs = imageIndexsFromUrl.length
+      ? imageIndexsFromUrl
+      : storedFocus.imageIndexs;
+    const hasInitialFocusTarget =
+      (Number.isFinite(lesionLabel) && lesionLabel > 0) || imageIndexs.length >= 3;
 
+    if (!hasInitialFocusTarget) {
+      initialLesionFocusApplied.current = true;
+      return true;
+    }
+
+    activeLesionEditTargetRef.current = {
+      lesionId,
+      lesionLabel: Number.isFinite(lesionLabel) && lesionLabel > 0 ? String(lesionLabel) : "",
+    };
+
+    let focused = false;
     if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
-      setActiveMaskSegment(lesionLabel, {
-        message: `当前编辑病灶标签 ${lesionLabel}`,
+      focused = focusMaskSegment(lesionLabel, {
+        message: `当前编辑病灶ID ${lesionId || lesionLabel}`,
+        fallbackImageIndexes: imageIndexs,
       });
+    } else if (imageIndexs.length) {
+      focused = jumpToImageIndexes(imageIndexs);
     }
 
-    if (imageIndexs.length) {
-      jumpToImageIndexes(imageIndexs);
+    if (focused) {
+      clearInitialLesionFocusTimer();
+      initialLesionFocusApplied.current = true;
+      window.sessionStorage.removeItem(LESION_EDIT_FOCUS_STORAGE_KEY);
+      const focusLoadToken = loadTokenRef.current;
+      for (let replayIndex = 1; replayIndex <= INITIAL_LESION_FOCUS_SETTLE_REPLAYS; replayIndex += 1) {
+        window.setTimeout(() => {
+          if (loadTokenRef.current === focusLoadToken && enableMaskEditing) {
+            if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
+              focusMaskSegment(lesionLabel, {
+                message: `当前编辑病灶ID ${lesionId || lesionLabel}`,
+                fallbackImageIndexes: imageIndexs,
+              });
+              return;
+            }
+
+            jumpToImageIndexes(imageIndexs);
+          }
+        }, replayIndex * INITIAL_LESION_FOCUS_RETRY_MS);
+      }
+      return true;
     }
 
-    initialLesionFocusApplied.current = true;
+    if (initialLesionFocusAttempts.current < INITIAL_LESION_FOCUS_MAX_ATTEMPTS) {
+      initialLesionFocusAttempts.current += 1;
+      clearInitialLesionFocusTimer();
+      initialLesionFocusTimer.current = setTimeout(
+        focusInitialLesionFromUrl,
+        INITIAL_LESION_FOCUS_RETRY_MS
+      );
+    }
+
+    return false;
   };
 
   const setViewportWindowLevel = (
@@ -703,67 +972,6 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
   const getSegmentationVolume = () =>
     cache.getVolume(maskSessionRef.current.segmentationVolumeId);
-
-  const getVisibleSegmentIndices = () => {
-    const segmentationVolume = getSegmentationVolume();
-
-    if (!segmentationVolume) {
-      return [];
-    }
-
-    const scalarData = segmentationVolume.getScalarData() as Uint8Array;
-    return Array.from(
-      scalarData.reduce<Set<number>>((segmentIndices, value) => {
-        if (value > 0) {
-          segmentIndices.add(value);
-        }
-        return segmentIndices;
-      }, new Set<number>())
-    );
-  };
-
-  const applyVisibleLesionSegments = (
-    nextVisibleLesions?: string[],
-    options: { preferAllWhenEmpty?: boolean } = {}
-  ) => {
-    const maskSession = maskSessionRef.current;
-
-    if (!maskSession.ready || !maskSession.segmentationRepresentationUID) {
-      return;
-    }
-
-    const segmentIndices = getVisibleSegmentIndices();
-    if (!segmentIndices.length) {
-      return;
-    }
-
-    const visibleSegments = (
-      nextVisibleLesions && nextVisibleLesions.length
-        ? nextVisibleLesions
-        : selectedLesions.current
-    )
-      .map((segmentIndex) => Number(segmentIndex))
-      .filter((segmentIndex) => Number.isFinite(segmentIndex) && segmentIndex > 0);
-    const visibleSegmentSet = new Set(visibleSegments);
-    const hasVisibleSegmentMatch = segmentIndices.some((segmentIndex) =>
-      visibleSegmentSet.has(segmentIndex)
-    );
-    const shouldShowAllSegments =
-      options.preferAllWhenEmpty === true &&
-      (!visibleSegmentSet.size || !hasVisibleSegmentMatch);
-
-    segmentIndices.forEach((segmentIndex) => {
-      segmentation.config.visibility.setSegmentVisibility(
-        VolumeToolGroup.id,
-        maskSession.segmentationRepresentationUID,
-        segmentIndex,
-        shouldShowAllSegments || visibleSegmentSet.has(segmentIndex)
-      );
-    });
-
-    renderingEngine?.render();
-    window.setTimeout(() => setMaskActorsVisibility(maskSession.visible), 0);
-  };
 
   const setMaskActorsVisibility = (visible: boolean) => {
     const maskSession = maskSessionRef.current;
@@ -874,7 +1082,6 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       }
 
       applyScalarDataToSegmentation(loadedMask, { recordHistory: false });
-      applyVisibleLesionSegments(undefined, { preferAllWhenEmpty: true });
       updateMaskState({
         source: response.source === "doctor" ? "doctor" : "algorithm",
         dirty: false,
@@ -1114,7 +1321,6 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       ),
       mode: "none",
     });
-    applyVisibleLesionSegments(undefined, { preferAllWhenEmpty: true });
     window.setTimeout(() => {
       focusInitialLesionFromUrl();
       if (pendingMaskReloadSource.current) {
@@ -1344,19 +1550,264 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     };
   };
 
-  const saveCurrentMask = async () => {
+  const formatMaskNumber = (value: number, digits = 1) =>
+    Number.isFinite(value) ? value.toFixed(digits) : "";
+
+  const formatStatisticNumber = (value: number, digits = 3) =>
+    Number.isFinite(value) ? value.toFixed(digits) : "";
+
+  const getCurrentMaskStats = (): LesionMaskStat[] => {
+    const maskSession = maskSessionRef.current;
+    const segmentationVolume = getSegmentationVolume();
+    const referencedVolume = cache.getVolume(maskSession.referencedVolumeId);
+    const petVolume = cache.getVolume(volumeIds[0]);
+    const ctVolume = cache.getVolume(volumeIds[ctVolumeIndex]);
+    const imageData = referencedVolume?.imageData;
+    const ctImageData = ctVolume?.imageData;
+
+    if (!maskSession.ready || !segmentationVolume || !referencedVolume) {
+      return [];
+    }
+
+    const scalarData = segmentationVolume.getScalarData() as Uint8Array;
+    const dimensions = referencedVolume.dimensions || [];
+    const spacing = referencedVolume.spacing || [];
+
+    if (
+      !scalarData ||
+      dimensions.length < 3 ||
+      spacing.length < 3 ||
+      !dimensions.every((value: number) => Number.isFinite(value) && value > 0)
+    ) {
+      return [];
+    }
+
+    const [dimX, dimY] = dimensions as [number, number, number];
+    const planeSize = dimX * dimY;
+    const voxelVolumeMl =
+      Math.abs(Number(spacing[0]) * Number(spacing[1]) * Number(spacing[2])) / 1000;
+    const petScalarData = petVolume?.getScalarData?.() as ArrayLike<number> | undefined;
+    const ctScalarData = ctVolume?.getScalarData?.() as ArrayLike<number> | undefined;
+    const canUsePetStats = !!petScalarData && petScalarData.length === scalarData.length;
+    const canUseCtSameGridStats = !!ctScalarData && ctScalarData.length === scalarData.length;
+    const ctDimensions = ctVolume?.dimensions || [];
+    const canUseCtWorldStats =
+      !!ctScalarData &&
+      !!ctImageData?.worldToIndex &&
+      !!imageData?.indexToWorld &&
+      ctDimensions.length >= 3 &&
+      ctDimensions.every((value: number) => Number.isFinite(value) && value > 0);
+    const sampleCtValue = (x: number, y: number, z: number, flatIndex: number) => {
+      if (!ctScalarData) {
+        return Number.NaN;
+      }
+
+      if (canUseCtSameGridStats) {
+        return Number(ctScalarData[flatIndex]);
+      }
+
+      if (!canUseCtWorldStats) {
+        return Number.NaN;
+      }
+
+      const worldPoint = imageData.indexToWorld([x, y, z]) as Types.Point3;
+      const ctIndex = ctImageData.worldToIndex(worldPoint) as Types.Point3;
+      const ctX = Math.round(ctIndex[0]);
+      const ctY = Math.round(ctIndex[1]);
+      const ctZ = Math.round(ctIndex[2]);
+      const [ctDimX, ctDimY, ctDimZ] = ctDimensions as [number, number, number];
+
+      if (
+        ctX < 0 ||
+        ctY < 0 ||
+        ctZ < 0 ||
+        ctX >= ctDimX ||
+        ctY >= ctDimY ||
+        ctZ >= ctDimZ
+      ) {
+        return Number.NaN;
+      }
+
+      return Number(ctScalarData[ctZ * ctDimX * ctDimY + ctY * ctDimX + ctX]);
+    };
+    const stats = new Map<
+      number,
+      {
+        count: number;
+        sumX: number;
+        sumY: number;
+        sumZ: number;
+        minX: number;
+        minY: number;
+        minZ: number;
+        maxX: number;
+        maxY: number;
+        maxZ: number;
+        petCount: number;
+        petSum: number;
+        petSumSquares: number;
+        petMax: number;
+        ctCount: number;
+        ctSum: number;
+        ctSumSquares: number;
+        ctMin: number;
+        ctMax: number;
+      }
+    >();
+
+    for (let flatIndex = 0; flatIndex < scalarData.length; flatIndex += 1) {
+      const label = scalarData[flatIndex];
+      if (!label) {
+        continue;
+      }
+
+      const z = Math.floor(flatIndex / planeSize);
+      const xyIndex = flatIndex - z * planeSize;
+      const y = Math.floor(xyIndex / dimX);
+      const x = xyIndex - y * dimX;
+      const current =
+        stats.get(label) ||
+        {
+          count: 0,
+          sumX: 0,
+          sumY: 0,
+          sumZ: 0,
+          minX: x,
+          minY: y,
+          minZ: z,
+          maxX: x,
+          maxY: y,
+          maxZ: z,
+          petCount: 0,
+          petSum: 0,
+          petSumSquares: 0,
+          petMax: Number.NEGATIVE_INFINITY,
+          ctCount: 0,
+          ctSum: 0,
+          ctSumSquares: 0,
+          ctMin: Number.POSITIVE_INFINITY,
+          ctMax: Number.NEGATIVE_INFINITY,
+        };
+
+      current.count += 1;
+      current.sumX += x;
+      current.sumY += y;
+      current.sumZ += z;
+      current.minX = Math.min(current.minX, x);
+      current.minY = Math.min(current.minY, y);
+      current.minZ = Math.min(current.minZ, z);
+      current.maxX = Math.max(current.maxX, x);
+      current.maxY = Math.max(current.maxY, y);
+      current.maxZ = Math.max(current.maxZ, z);
+
+      if (canUsePetStats) {
+        const petValue = Number(petScalarData[flatIndex]);
+        if (Number.isFinite(petValue)) {
+          current.petCount += 1;
+          current.petSum += petValue;
+          current.petSumSquares += petValue * petValue;
+          current.petMax = Math.max(current.petMax, petValue);
+        }
+      }
+
+      if (canUseCtSameGridStats || canUseCtWorldStats) {
+        const ctValue = sampleCtValue(x, y, z, flatIndex);
+        if (Number.isFinite(ctValue)) {
+          current.ctCount += 1;
+          current.ctSum += ctValue;
+          current.ctSumSquares += ctValue * ctValue;
+          current.ctMin = Math.min(current.ctMin, ctValue);
+          current.ctMax = Math.max(current.ctMax, ctValue);
+        }
+      }
+
+      stats.set(label, current);
+    }
+
+    return Array.from(stats.entries())
+      .sort(([leftLabel], [rightLabel]) => leftLabel - rightLabel)
+      .map(([label, stat]) => {
+        const centerIndex: Types.Point3 = [
+          stat.sumX / stat.count,
+          stat.sumY / stat.count,
+          stat.sumZ / stat.count,
+        ];
+        const centerWorld = imageData?.indexToWorld
+          ? (imageData.indexToWorld(centerIndex) as Types.Point3)
+          : null;
+        const range = [
+          (stat.maxX - stat.minX + 1) * Number(spacing[0]),
+          (stat.maxY - stat.minY + 1) * Number(spacing[1]),
+          (stat.maxZ - stat.minZ + 1) * Number(spacing[2]),
+        ];
+        const petMean = stat.petCount ? stat.petSum / stat.petCount : Number.NaN;
+        const petVariance = stat.petCount
+          ? Math.max(stat.petSumSquares / stat.petCount - petMean * petMean, 0)
+          : Number.NaN;
+        const ctMean = stat.ctCount ? stat.ctSum / stat.ctCount : Number.NaN;
+        const ctVariance = stat.ctCount
+          ? Math.max(stat.ctSumSquares / stat.ctCount - ctMean * ctMean, 0)
+          : Number.NaN;
+
+        return {
+          lesionLabel: String(label),
+          centerIndex: `[${centerIndex.map((value) => formatMaskNumber(value)).join(", ")}]`,
+          centerPosition: centerWorld
+            ? `[${centerWorld.map((value) => `${formatMaskNumber(value)}mm`).join(", ")}]`
+            : "",
+          range: `[${range.map((value) => `${formatMaskNumber(value)}mm`).join(", ")}]`,
+          volume: `${formatMaskNumber(stat.count * voxelVolumeMl, 3)}ml`,
+          suvMax: stat.petCount ? formatStatisticNumber(stat.petMax) : "",
+          suvMean: stat.petCount ? formatStatisticNumber(petMean) : "",
+          suvStd: stat.petCount ? formatStatisticNumber(Math.sqrt(petVariance)) : "",
+          ctCentroid: stat.ctCount ? formatStatisticNumber(ctMean) : "",
+          ctMin: stat.ctCount ? formatStatisticNumber(stat.ctMin) : "",
+          ctMax: stat.ctCount ? formatStatisticNumber(stat.ctMax) : "",
+          ctMean: stat.ctCount ? formatStatisticNumber(ctMean) : "",
+          ctStd: stat.ctCount ? formatStatisticNumber(Math.sqrt(ctVariance)) : "",
+          debugInfo: `voxel_count=${stat.count}|source=doctor_mask`,
+          voxelCount: stat.count,
+        };
+      });
+  };
+
+  const persistCurrentMask = async (reason: "save" | "export") => {
     const payload = getCurrentMaskPayload();
+    const maskStats = getCurrentMaskStats();
+    let exportParentDir = "";
 
     if (!payload || !effectiveOutputPath) {
       updateMaskState({
-        message: "Missing information required to save the mask",
+        message:
+          reason === "export"
+            ? "Missing information required to export the result"
+            : "Missing information required to save the mask",
       });
       return;
+    }
+
+    if (reason === "export") {
+      if (!ipcRenderer) {
+        updateMaskState({ message: "当前环境不支持选择导出目录" });
+        return;
+      }
+
+      exportParentDir = await ipcRenderer.invoke("select-result-export-directory");
+      if (!exportParentDir) {
+        updateMaskState({ message: "已取消导出结果" });
+        return;
+      }
     }
 
     try {
       const result = await saveSegmentation(seriesId, payload);
       const scalarData = base64ToUint8Array(payload.scalarDataBase64);
+      const message =
+        reason === "export"
+          ? "医生结果已同步，正在导出结果文件夹"
+          : scalarData.some((value) => value > 0)
+            ? `Mask saved as doctor revision: ${result.path || "doctor_mask.nii.gz"}`
+            : `Saved a blank mask: ${result.path || "doctor_mask.nii.gz"}`;
       updateMaskState({
         dirty: false,
         source: "doctor",
@@ -1366,60 +1817,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         redoStack: [],
         canUndo: false,
         canRedo: false,
-        message:
-          scalarData.some((value) => value > 0)
-            ? `Mask saved as doctor revision: ${result.path || "doctor_mask.nii.gz"}`
-            : `Saved a blank mask: ${result.path || "doctor_mask.nii.gz"}`,
+        message,
+      });
+      PubSub.publish(MASK_PERSISTED_TOPIC, {
+        path: result.path || "",
+        outputPath: effectiveOutputPath,
+        reason,
+        maskStats,
+        exportParentDir,
+        lesionTarget: activeLesionEditTargetRef.current,
       });
     } catch (error) {
       updateMaskState({
-        message: "Mask save failed",
-      });
-    }
-  };
-
-  const exportCurrentMask = async () => {
-    const payload = getCurrentMaskPayload();
-
-    if (!payload) {
-      updateMaskState({
-        message: "Missing information required to export the mask",
-      });
-      return;
-    }
-
-    if (!ipcRenderer) {
-      updateMaskState({
-        message: "当前环境无法打开Mask导出窗口",
-      });
-      return;
-    }
-
-    try {
-      const defaultFileName = `${seriesId || "doctor"}_doctor_mask.nii.gz`;
-      const exportPath = await ipcRenderer.invoke(
-        "select-mask-export-path",
-        defaultFileName
-      );
-
-      if (!exportPath) {
-        updateMaskState({
-          message: "已取消导出Mask",
-        });
-        return;
-      }
-
-      const result = await exportSegmentation(seriesId, {
-        ...payload,
-        exportPath,
-      });
-
-      updateMaskState({
-        message: `Mask exported: ${result.path || exportPath}`,
-      });
-    } catch (error) {
-      updateMaskState({
-        message: "Mask export failed",
+        message: reason === "export" ? "Result export failed" : "Mask save failed",
       });
     }
   };
@@ -1428,6 +1838,9 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     const loadToken = loadTokenRef.current + 1;
     loadTokenRef.current = loadToken;
     volumeLoaded.current = false;
+    initialLesionFocusApplied.current = false;
+    initialLesionFocusAttempts.current = 0;
+    clearInitialLesionFocusTimer();
     updateMaskState(createInitialMaskSessionState());
     setMaskLoadingProgress(1, "Loading image data...");
     const brushCursorHandlers: Array<{
@@ -1579,12 +1992,29 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         });
       }
     );
+    const focusSegmentToken = PubSub.subscribe(
+      MASK_FOCUS_SEGMENT_TOPIC,
+      (_, segmentIndex) => {
+        focusMaskSegment(Number(segmentIndex), {
+          message: `当前病灶标签 ${segmentIndex}`,
+        });
+      }
+    );
     const lesionOpenToken = PubSub.subscribe("lesionEdit:open", (_, lesion: any) => {
       const lesionLabel = Number(lesion?.lesionLabel);
+      const imageIndexs = parseIndexList(lesion?.imageIndexs || "");
+      activeLesionEditTargetRef.current = {
+        lesionId: lesion?.id ? String(lesion.id) : "",
+        lesionLabel: Number.isFinite(lesionLabel) && lesionLabel > 0 ? String(lesionLabel) : "",
+      };
+
       if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
-        setActiveMaskSegment(lesionLabel, {
+        focusMaskSegment(lesionLabel, {
           message: `当前病灶标签 ${lesionLabel}`,
+          fallbackImageIndexes: imageIndexs,
         });
+      } else if (imageIndexs.length) {
+        jumpToImageIndexes(imageIndexs);
       }
     });
     const modeToken = PubSub.subscribe(MASK_SET_MODE_TOPIC, (_, mode) => {
@@ -1596,12 +2026,6 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     const brushSizeToken = PubSub.subscribe(MASK_BRUSH_SIZE_TOPIC, (_, delta) => {
       changeBrushSize(delta as number);
     });
-    const visibleSegmentsToken = PubSub.subscribe(
-      MASK_VISIBLE_SEGMENTS_TOPIC,
-      (_, lesionLabels) => {
-        applyVisibleLesionSegments((lesionLabels || []) as string[]);
-      }
-    );
     const reloadToken = PubSub.subscribe(MASK_RELOAD_TOPIC, (_, payload) => {
       reloadSegmentationFromDisk((payload || {}) as MaskReloadPayload);
     });
@@ -1615,10 +2039,10 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       redoMaskEdit();
     });
     const saveToken = PubSub.subscribe(MASK_SAVE_TOPIC, () => {
-      saveCurrentMask();
+      persistCurrentMask("save");
     });
     const exportToken = PubSub.subscribe(MASK_EXPORT_TOPIC, () => {
-      exportCurrentMask();
+      persistCurrentMask("export");
     });
     const segmentationModifiedHandler = (event) => {
       if (
@@ -1643,11 +2067,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       );
       PubSub.unsubscribe(jumpToken);
       PubSub.unsubscribe(activeSegmentToken);
+      PubSub.unsubscribe(focusSegmentToken);
       PubSub.unsubscribe(lesionOpenToken);
       PubSub.unsubscribe(modeToken);
       PubSub.unsubscribe(visibilityToken);
       PubSub.unsubscribe(brushSizeToken);
-      PubSub.unsubscribe(visibleSegmentsToken);
       PubSub.unsubscribe(reloadToken);
       PubSub.unsubscribe(brushShapeToken);
       PubSub.unsubscribe(undoToken);
@@ -1670,6 +2094,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       if (maskSessionRef.current.historyTimer) {
         clearTimeout(maskSessionRef.current.historyTimer);
       }
+      clearInitialLesionFocusTimer();
     };
   }, [effectiveOutputPath, enableMaskEditing, inputPath, pflag, selectedSeries, volumeIds]);
 

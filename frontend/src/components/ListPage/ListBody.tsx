@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Fragment } from "react";
+import React, { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAppSelector, useAppDispatch } from "../../redux/hooks";
@@ -10,33 +10,124 @@ import {
   toLastPage,
 } from "../../redux/ListPageSlice";
 import { updatePatientInfo } from "../../redux/patientSlice";
-import { patientState } from "../../types";
-
-interface display_listType {
-  seriesId: string;
-  pname: string;
-  pID: string;
-  sex: string;
-  birthday: string;
-  scanMode: string;
-  scanTime: string;
-  inputPath: string;
-  outputPath: string;
-  modifiedTime: string;
-  pflag: string;
-  seriesDesc: string;
-}
+import {
+  listPatientGroup,
+  listSeriesItem,
+  patientState,
+} from "../../types";
 
 const product = "NNUNET";
 const refreshTime = 2000;
 let totalPage = 1;
+
+const normalizeSeriesItem = (item: any): listSeriesItem => {
+  const pname = item.pname || item.name || "匿名";
+  const patientKey = String(item.pID || pname || "anonymous");
+  const studyDate = item.studyDate || item.scanTime || "";
+
+  return {
+    seriesId: item.seriesId || "",
+    pname,
+    pID: item.pID || "",
+    sex: item.sex || "",
+    birthday: item.birthday || "",
+    scanMode: item.scanMode || "",
+    scanTime: item.scanTime || "",
+    modifiedTime: item.modifiedTime || "",
+    inputPath: item.inputPath || "",
+    outputPath: item.outputPath || "",
+    pflag: item.pflag || item.flag || "",
+    seriesDesc: item.seriesDesc || "",
+    studyKey: item.studyKey || `${patientKey}_${studyDate || "unknown"}`,
+    studyLabel: item.studyLabel || studyDate || "未知检查",
+    studyDate,
+  };
+};
+
+const buildPatientTreeFromFlatList = (items: any[]): listPatientGroup[] => {
+  const patientMap = new Map<string, listPatientGroup>();
+
+  items.map(normalizeSeriesItem).forEach((series) => {
+    const patientKey = String(series.pID || series.pname || "anonymous");
+    let patient = patientMap.get(patientKey);
+
+    if (!patient) {
+      patient = {
+        patientKey,
+        pname: series.pname || "匿名",
+        pID: series.pID || "",
+        sex: series.sex || "",
+        birthday: series.birthday || "",
+        studyCount: 0,
+        seriesCount: 0,
+        studies: [],
+      };
+      patientMap.set(patientKey, patient);
+    }
+
+    let study = patient.studies.find((item) => item.studyKey === series.studyKey);
+    if (!study) {
+      study = {
+        studyKey: series.studyKey,
+        studyLabel: series.studyLabel,
+        studyDate: series.studyDate,
+        seriesCount: 0,
+        seriesList: [],
+      };
+      patient.studies.push(study);
+    }
+
+    study.seriesList.push(series);
+    study.seriesCount += 1;
+    patient.seriesCount += 1;
+  });
+
+  return Array.from(patientMap.values()).map((patient) => ({
+    ...patient,
+    studyCount: patient.studies.length,
+  }));
+};
+
+const normalizePatientGroups = (payload: any): listPatientGroup[] => {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  if (!payload.length) {
+    return [];
+  }
+
+  const firstItem = payload[0];
+  if (firstItem && Array.isArray(firstItem.studies)) {
+    return payload.map((patient) => ({
+      patientKey: patient.patientKey || String(patient.pID || patient.pname || "anonymous"),
+      pname: patient.pname || "匿名",
+      pID: patient.pID || "",
+      sex: patient.sex || "",
+      birthday: patient.birthday || "",
+      studyCount: Number(patient.studyCount || (Array.isArray(patient.studies) ? patient.studies.length : 0)),
+      seriesCount: Number(patient.seriesCount || 0),
+      studies: (patient.studies || []).map((study: any) => ({
+        studyKey: study.studyKey || "unknown",
+        studyLabel: study.studyLabel || study.studyDate || "未知检查",
+        studyDate: study.studyDate || "",
+        seriesCount: Number(study.seriesCount || (Array.isArray(study.seriesList) ? study.seriesList.length : 0)),
+        seriesList: Array.isArray(study.seriesList)
+          ? study.seriesList.map(normalizeSeriesItem)
+          : [],
+      })),
+    }));
+  }
+
+  return buildPatientTreeFromFlatList(payload);
+};
 
 const getNewList = (
   curPage: number,
   sizePerPage: number,
   searchName: string,
   dispatch: AppDispatch,
-  setList: React.Dispatch<React.SetStateAction<display_listType[]>>
+  setList: React.Dispatch<React.SetStateAction<listPatientGroup[]>>
 ) => {
   axios
     .post("http://localhost:4001/list", {
@@ -51,7 +142,7 @@ const getNewList = (
       if (curPage > totalPage) {
         dispatch(toFirstPage());
       }
-      setList(result.data[0]);
+      setList(normalizePatientGroups(result.data[0]));
     });
 };
 
@@ -61,7 +152,7 @@ const deleteRecord = (
   sizePerPage: number,
   searchName: string,
   dispatch: AppDispatch,
-  setList: React.Dispatch<React.SetStateAction<display_listType[]>>
+  setList: React.Dispatch<React.SetStateAction<listPatientGroup[]>>
 ) => {
   if (window.confirm("确认删除?")) {
     axios
@@ -72,12 +163,21 @@ const deleteRecord = (
       })
       .catch((err) => {
         console.log(err);
-        const message = err.response && err.response.data && err.response.data.error
-          ? err.response.data.error
-          : "删除失败";
+        const message =
+          err.response && err.response.data && err.response.data.error
+            ? err.response.data.error
+            : "删除失败";
         alert(message);
       });
   }
+};
+
+const truncateText = (value: string, maxLength: number) => {
+  if (!value) {
+    return "-";
+  }
+
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 };
 
 const Listbody: React.FC = () => {
@@ -85,23 +185,47 @@ const Listbody: React.FC = () => {
   const curPage = useAppSelector((state) => state.ListPage.curPage);
   const searchName = useAppSelector((state) => state.ListPage.searchName);
   const dispatch = useAppDispatch();
-  const [display_list, setList] = useState<display_listType[]>([]); //display_list 为数据
+  const [displayList, setList] = useState<listPatientGroup[]>([]);
+  const [expandedPatients, setExpandedPatients] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [expandedStudies, setExpandedStudies] = useState<Record<string, boolean>>(
+    {}
+  );
   const sizePerPage = window.innerHeight >= 950 ? 12 : 10;
 
   useEffect(() => {
-    // 监控页码刷新列表
     getNewList(curPage, sizePerPage, searchName, dispatch, setList);
   }, [curPage, searchName, dispatch, sizePerPage]);
 
   useEffect(() => {
-    // 定时刷新
     const timer = setInterval(() => {
       getNewList(curPage, sizePerPage, searchName, dispatch, setList);
     }, refreshTime);
+
     return () => {
       clearInterval(timer);
     };
-  });
+  }, [curPage, searchName, dispatch, sizePerPage]);
+
+  useEffect(() => {
+    if (!searchName) {
+      return;
+    }
+
+    const nextExpandedPatients: Record<string, boolean> = {};
+    const nextExpandedStudies: Record<string, boolean> = {};
+
+    displayList.forEach((patient) => {
+      nextExpandedPatients[patient.patientKey] = true;
+      (patient.studies || []).forEach((study) => {
+        nextExpandedStudies[study.studyKey] = true;
+      });
+    });
+
+    setExpandedPatients(nextExpandedPatients);
+    setExpandedStudies(nextExpandedStudies);
+  }, [displayList, searchName]);
 
   const imgBtn = (patientInfo: patientState["patientInfo"]) => {
     const { pflag } = patientInfo;
@@ -117,102 +241,141 @@ const Listbody: React.FC = () => {
     }
   };
 
+  const togglePatient = (patientKey: string) => {
+    setExpandedPatients((current) => ({
+      ...current,
+      [patientKey]: !current[patientKey],
+    }));
+  };
+
+  const toggleStudy = (studyKey: string) => {
+    setExpandedStudies((current) => ({
+      ...current,
+      [studyKey]: !current[studyKey],
+    }));
+  };
+
+  const renderSeriesRow = (series: listSeriesItem) => (
+    <div className="treeRow seriesRow" key={series.seriesId}>
+      <div className="treeCell descCell DropdownContainer">
+        <span>{truncateText(series.seriesDesc, window.innerWidth >= 1400 ? 28 : 16)}</span>
+        {series.seriesDesc ? <div className="dropdown">{series.seriesDesc}</div> : null}
+      </div>
+      <div className="treeCell noCell DropdownContainer">
+        <span>{truncateText(series.seriesId, window.innerWidth >= 1400 ? 18 : 8)}</span>
+        <div className="dropdown">{series.seriesId}</div>
+      </div>
+      <div className="treeCell modeCell">{series.scanMode || "-"}</div>
+      <div className="treeCell studyCell">{series.scanTime || series.studyLabel}</div>
+      <div className="treeCell operationCell">
+        <button className="listBtn" onClick={() => imgBtn(series)}>
+          查看
+        </button>
+        <button
+          className="listBtn"
+          onClick={() =>
+            deleteRecord(
+              series.seriesId,
+              curPage,
+              sizePerPage,
+              searchName,
+              dispatch,
+              setList
+            )
+          }
+        >
+          删除
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <Fragment>
       <div className="bodyBox">
-        <div className="listRow listRow1">
-          <div className="desc">序列描述</div>
-          <div className="no">序号</div>
-          <div className="name"> 姓名</div>
-          <div className="sex">性别</div>
-          <div className="birthday">生日</div>
-          <div className="mode">扫描模态</div>
-          <div className="processTime">扫描时间</div>
-          <div className="modifineTime">处理时间</div>
-          <div className="operation">操作</div>
+        <div className="treeHeader">
+          <div className="treeCell patientCell">患者</div>
+          <div className="treeCell metaCell">患者ID</div>
+          <div className="treeCell metaCell">性别</div>
+          <div className="treeCell metaCell">生日</div>
+          <div className="treeCell countCell">检查数</div>
+          <div className="treeCell countCell">序列数</div>
         </div>
-        {display_list.length
-          ? display_list.map((obj) => {
-              return (
-                <div className="listRow" key={obj.seriesId}>
-                  {window.innerWidth >= 1400 ? (
-                    obj.seriesDesc && obj.seriesDesc.length >= 20 ? (
-                      <div className="desc DropdownContainer">
-                        <span>{obj.seriesDesc.slice(0, 20) + "..."}</span>{" "}
-                        <div className="dropdown">{obj.seriesDesc}</div>
-                      </div>
-                    ) : (
-                      <div className="desc">{obj.seriesDesc}</div>
-                    )
-                  ) : obj.seriesDesc && obj.seriesDesc.length >= 10 ? (
-                    <div className="desc DropdownContainer">
-                      <span>{obj.seriesDesc.slice(0, 10) + "..."}</span>{" "}
-                      <div className="dropdown">{obj.seriesDesc}</div>
-                    </div>
-                  ) : (
-                    <div className="desc">{obj.seriesDesc}</div>
-                  )}
-                  {window.innerWidth <= 1400 &&
-                  obj.seriesId &&
-                  obj.seriesId.length >= 5 ? (
-                    <div className="no DropdownContainer">
-                      <span>{obj.seriesId.slice(0, 5) + "..."}</span>
-                      <div className="dropdown">{obj.seriesId}</div>
-                    </div>
-                  ) : obj.seriesId && obj.seriesId.length > 16 ? (
-                    <div className="no DropdownContainer">
-                      <span>{obj.seriesId.slice(0, 16) + "..."}</span>
-                      <div className="dropdown">{obj.seriesId}</div>
-                    </div>
-                  ) : (
-                    <div className="no">{obj.seriesId}</div>
-                  )}
-                  {obj.pname && obj.pname.length > 10 ? (
-                    <div className="name DropdownContainer">
-                      <span>{obj.pname.slice(0, 10) + "..."}</span>
-                      <div className="dropdown">{obj.pname}</div>
-                    </div>
-                  ) : (
-                    <div className="name">{obj.pname} </div>
-                  )}
-                  <div className="sex">{obj.sex}</div>
-                  <div className="birthday">{obj.birthday}</div>
-                  <div className="mode">{obj.scanMode}</div>
-                  <div className="processTime">{obj.scanTime}</div>
-                  {obj.modifiedTime &&
-                  obj.modifiedTime.length > 10 &&
-                  window.innerWidth <= 1400 ? (
-                    <div className="modifineTime DropdownContainer">
-                      <span>{obj.modifiedTime.slice(0, 10)}</span>
-                      <div className="dropdown">{obj.modifiedTime}</div>
-                    </div>
-                  ) : (
-                    <div className="modifineTime">{obj.modifiedTime}</div>
-                  )}
-                  <div className="operation">
-                    <button className="listBtn" onClick={() => imgBtn(obj)}>
-                      查看
-                    </button>
-                    <button
-                      className="listBtn"
-                      onClick={() =>
-                        deleteRecord(
-                          obj.seriesId,
-                          curPage,
-                          sizePerPage,
-                          searchName,
-                          dispatch,
-                          setList
-                        )
-                      }
-                    >
-                      删除
-                    </button>
+        {displayList.length ? (
+          displayList.map((patient) => {
+            const patientExpanded = !!expandedPatients[patient.patientKey];
+
+            return (
+              <div className="treeGroup" key={patient.patientKey}>
+                <button
+                  className="treeRow patientRow"
+                  onClick={() => togglePatient(patient.patientKey)}
+                  type="button"
+                >
+                  <div className="treeCell patientCell">
+                    <span className="treeArrow">{patientExpanded ? "▾" : "▸"}</span>
+                    <span className="treeTitle">{patient.pname || "匿名"}</span>
                   </div>
-                </div>
-              );
-            })
-          : null}
+                  <div className="treeCell metaCell">{patient.pID || "-"}</div>
+                  <div className="treeCell metaCell">{patient.sex || "-"}</div>
+                  <div className="treeCell metaCell">{patient.birthday || "-"}</div>
+                  <div className="treeCell countCell">{patient.studyCount}</div>
+                  <div className="treeCell countCell">{patient.seriesCount}</div>
+                </button>
+
+                {patientExpanded
+                  ? (patient.studies || []).map((study) => {
+                      const studyExpanded = !!expandedStudies[study.studyKey];
+
+                      return (
+                        <div className="studyBlock" key={study.studyKey}>
+                          <button
+                            className="treeRow studyRow"
+                            onClick={() => toggleStudy(study.studyKey)}
+                            type="button"
+                          >
+                            <div className="treeCell studyTitleCell">
+                              <span className="treeArrow">
+                                {studyExpanded ? "▾" : "▸"}
+                              </span>
+                              <span className="treeTitle">检查</span>
+                            </div>
+                            <div className="treeCell studyInfoCell">
+                              <span className="studyLabel">study</span>
+                              <span>{study.studyLabel || "未知检查"}</span>
+                            </div>
+                            <div className="treeCell studyInfoCell">
+                              <span className="studyLabel">检查时间</span>
+                              <span>{study.studyDate || "-"}</span>
+                            </div>
+                            <div className="treeCell studyCountCell">
+                              <span className="studyLabel">序列数</span>
+                              <span>{study.seriesCount}</span>
+                            </div>
+                          </button>
+
+                          {studyExpanded ? (
+                            <div className="seriesSection">
+                              <div className="treeRow seriesHeader">
+                                <div className="treeCell descCell">序列描述</div>
+                                <div className="treeCell noCell">序号</div>
+                                <div className="treeCell modeCell">扫描模态</div>
+                                <div className="treeCell studyCell">检查时间/检查</div>
+                                <div className="treeCell operationCell">操作</div>
+                              </div>
+                              {(study.seriesList || []).map(renderSeriesRow)}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  : null}
+              </div>
+            );
+          })
+        ) : (
+          <div className="emptyState">暂无符合条件的检查数据</div>
+        )}
       </div>
       <div className="pagination">
         <button

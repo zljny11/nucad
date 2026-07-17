@@ -19,6 +19,18 @@ const initialState: patientState = {
     "0": {
       data: [],
       name: "",
+      header: [],
+      doctorData: [],
+      meta: {
+        sourceType: "none",
+        sourcePath: "",
+        cachePath: "",
+        templatePath: "",
+        templateExt: "",
+        templateFileName: "",
+        templateSheetName: "",
+        importedAt: "",
+      },
     },
   },
 };

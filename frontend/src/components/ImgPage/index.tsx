@@ -11,6 +11,7 @@ import ImgShowHeader from "./ImgShowHeader";
 import ImgShow from "./ImgShow";
 import Report from "./Report";
 import EditableLesionPanel from "./EditableLesionPanel";
+import LesionResultSync from "./LesionResultSync";
 import SeriesSelectorPanel, { SelectedSeries } from "./SeriesSelectorPanel";
 import {
   LESION_EDIT_CLOSE_TOPIC,
@@ -32,7 +33,7 @@ const ImgPage: React.FC = () => {
     selectedLesions.current = selectedLesionsState;
   }, [selectedLesionsState]);
 
-  const handleSeriesChange = useCallback((series: SelectedSeries) => {
+  const handleSeriesChange = useCallback((series: SelectedSeries | null) => {
     setSelectedSeries(series);
     PubSub.publish(SERIES_CHANGE_TOPIC, series);
   }, []);
@@ -93,6 +94,7 @@ const ImgPage: React.FC = () => {
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>
         <Report />
+        <LesionResultSync />
       </ImgPageContext.Provider>
     </div>
   );

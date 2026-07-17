@@ -71,25 +71,102 @@ function formatListStudy(row) {
     pname = '匿名'
   }
 
-  return { seriesId, pname, pID, sex, birthday, scanMode, scanTime, inputPath, outputPath, modifiedTime, pflag: flag, seriesDesc }
+  const patientKey = String(pID || pname || 'anonymous')
+  const studyDate = scanTime || ''
+  const studyKey = `${patientKey}_${studyDate || 'unknown'}`
+  const studyLabel = studyDate || '未知检查'
+
+  return {
+    seriesId,
+    pname,
+    pID,
+    sex,
+    birthday,
+    scanMode,
+    scanTime,
+    inputPath,
+    outputPath,
+    modifiedTime,
+    pflag: flag,
+    seriesDesc,
+    studyKey,
+    studyLabel,
+    studyDate,
+  }
+}
+
+function matchesStudySearch(study, normalizedSearch) {
+  if (!normalizedSearch) {
+    return true
+  }
+
+  return ['seriesId', 'pname', 'pID', 'birthday', 'scanMode', 'scanTime', 'modifiedTime', 'seriesDesc', 'studyLabel']
+    .some((key) => String(study[key] || '').toLowerCase().includes(normalizedSearch))
+}
+
+function buildPatientTree(studies, { curPage, sizePerPage, searchName }) {
+  const normalizedSearch = String(searchName || '').toLowerCase()
+  const low = (curPage - 1) * sizePerPage
+  const filteredStudies = studies
+    .map(formatListStudy)
+    .filter((study) => matchesStudySearch(study, normalizedSearch))
+    .sort((a, b) => String(b.seriesId || '').localeCompare(String(a.seriesId || '')))
+
+  const patientMap = new Map()
+
+  filteredStudies.forEach((study) => {
+    const patientKey = String(study.pID || study.pname || 'anonymous')
+    let patientGroup = patientMap.get(patientKey)
+
+    if (!patientGroup) {
+      patientGroup = {
+        patientKey,
+        pname: study.pname || '匿名',
+        pID: study.pID || '',
+        sex: study.sex || '',
+        birthday: study.birthday || '',
+        studyCount: 0,
+        seriesCount: 0,
+        studies: [],
+      }
+      patientMap.set(patientKey, patientGroup)
+    }
+
+    let studyGroup = patientGroup.studies.find((item) => item.studyKey === study.studyKey)
+    if (!studyGroup) {
+      studyGroup = {
+        studyKey: study.studyKey,
+        studyLabel: study.studyLabel,
+        studyDate: study.studyDate,
+        seriesCount: 0,
+        seriesList: [],
+      }
+      patientGroup.studies.push(studyGroup)
+    }
+
+    studyGroup.seriesList.push(study)
+    studyGroup.seriesCount += 1
+    patientGroup.seriesCount += 1
+  })
+
+  const patientGroups = Array.from(patientMap.values()).map((patientGroup) => {
+    patientGroup.studies.sort((a, b) => String(b.studyDate || '').localeCompare(String(a.studyDate || '')))
+    patientGroup.studyCount = patientGroup.studies.length
+    return patientGroup
+  })
+
+  patientGroups.sort((a, b) => {
+    const latestA = a.studies[0] ? String(a.studies[0].studyDate || '') : ''
+    const latestB = b.studies[0] ? String(b.studies[0].studyDate || '') : ''
+    return latestB.localeCompare(latestA) || String(b.patientKey).localeCompare(String(a.patientKey))
+  })
+
+  return [patientGroups.slice(low, low + sizePerPage), patientGroups.length]
 }
 
 function getLocalList({ curPage, sizePerPage, searchName }) {
-  const low = (curPage - 1) * sizePerPage
-  const normalizedSearch = String(searchName || '').toLowerCase()
   const studies = readLocalStudies()
-    .filter((study) => !(study.flag === '3' && study.scanMode === 'CT'))
-    .filter((study) => {
-      if (!normalizedSearch) {
-        return true
-      }
-
-      return ['seriesId', 'name', 'birthday', 'scanMode', 'scanTime', 'processingTime', 'seriesDesc']
-        .some((key) => String(study[key] || '').toLowerCase().includes(normalizedSearch))
-    })
-    .sort((a, b) => String(b.seriesId || '').localeCompare(String(a.seriesId || '')))
-
-  return [studies.slice(low, low + sizePerPage).map(formatListStudy), studies.length]
+  return buildPatientTree(studies, { curPage, sizePerPage, searchName })
 }
 
 /* GET home page. */
@@ -99,38 +176,22 @@ router.get('/', function (req, res, next) {
 
 router.post('/list', function (req, res) {
   const { product, curPage, sizePerPage, searchName } = req.body
-  const low = (curPage - 1) * sizePerPage
-  let SQLgetInfo1, SQLgetInfo2
+  let SQLgetInfo
 
   if (!searchName) {
-    SQLgetInfo1 = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product + " order by seriesId desc limit " + low + "," + sizePerPage
-    SQLgetInfo2 = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product
+    SQLgetInfo = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product
   } else {
-    SQLgetInfo1 = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product +
-      " where seriesId like '%" + searchName + "%' or name like '%" + searchName + "%' or birthday like '%" + searchName + "%' or scanMode like '%" + searchName + "%' or scanTime like '%" + searchName + "%' or processingTime like '%" + searchName + "%' or seriesDesc like '%" + searchName + "%' order by seriesId desc limit " + low + "," + sizePerPage
-    SQLgetInfo2 = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product +
-      " where seriesId like '%" + searchName + "%' or name like '%" + searchName + "%' or birthday like '%" + searchName + "%' or scanMode like '%" + searchName + "%' or scanTime like '%" + searchName + "%' or processingTime like '%" + searchName + "%' or seriesDesc like '%" + searchName + "%'"
+    SQLgetInfo = "select seriesId,name,sex,date_format(birthday,'%Y-%m-%d') birthday,scanMode,date_format(scanTime,'%Y-%m-%d') scanTime,date_format(processingTime,'%Y-%m-%d %H:%i') processingTime,seriesDesc,institution,inputPath,outputPath,pID,flag from " + product +
+      " where seriesId like '%" + searchName + "%' or name like '%" + searchName + "%' or pID like '%" + searchName + "%' or birthday like '%" + searchName + "%' or scanMode like '%" + searchName + "%' or scanTime like '%" + searchName + "%' or processingTime like '%" + searchName + "%' or seriesDesc like '%" + searchName + "%'"
   }
 
-  connection.query(SQLgetInfo1, function (error, results) {
+  connection.query(SQLgetInfo, function (error, results) {
     if (error) {
       console.error('Failed to fetch study list:', error)
       return res.send(getLocalList({ curPage, sizePerPage, searchName }))
     }
 
-    const study_list = []
-    for (let i = 0; i < results.length; ++i) {
-      study_list.push(formatListStudy(results[i]))
-    }
-
-    connection.query(SQLgetInfo2, (countError, result) => {
-      if (countError) {
-        console.error('Failed to count study list:', countError)
-        return res.send([study_list, study_list.length])
-      }
-
-      res.send([study_list, result.length])
-    })
+    res.send(buildPatientTree(results, { curPage, sizePerPage, searchName }))
   })
 })
 

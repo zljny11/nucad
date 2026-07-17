@@ -215,19 +215,20 @@ const ListPage: React.FC = () => {
               <div className="NewIconfont">&#xe8b9;</div>
             </div>
           </form>
+
+          <button
+            className="importButton"
+            disabled={importing}
+            onClick={importLocalDicom}
+          >
+            {importing ? "导入中" : "导入"}
+          </button>
         </div>
 
         <div onClick={() => navigate("/")} className="backButton">
-          <div className="NewIconfont"> &#xe8a4; 返回 </div>
+          <div className="NewIconfont">&#xe8a4;<span>返回</span></div>
         </div>
 
-        <button
-          className="importButton"
-          disabled={importing}
-          onClick={importLocalDicom}
-        >
-          {importing ? "导入中" : "导入"}
-        </button>
         {importStatus ? <div className="importStatus">{importStatus}</div> : null}
       </div>
 

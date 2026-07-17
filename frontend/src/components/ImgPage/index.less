@@ -155,6 +155,25 @@
       line-height: 1;
       pointer-events: none;
     }
+
+    .maskStatusFloating {
+      position: absolute;
+      right: 20px;
+      bottom: 12px;
+      z-index: 1100;
+      max-width: min(620px, calc(100vw - 40px));
+      padding: 6px 10px;
+      box-sizing: border-box;
+      border: 1px solid rgba(42, 144, 184, 0.75);
+      border-radius: 6px;
+      background: rgba(8, 16, 20, 0.9);
+      color: #d8edf7;
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: right;
+      word-break: break-all;
+      pointer-events: none;
+    }
   }
 
   .imgShowBody {
@@ -181,21 +200,23 @@
     }
 
     .seriesSelectorPanel {
-      flex: 0 0 240px;
-      width: 240px;
+      flex: 0 0 220px;
+      width: 220px;
       height: 100%;
       box-sizing: border-box;
+      margin-right: 8px;
       border-right: 1px solid #0069a7;
       background-color: #080808;
       color: #fff;
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      position: relative;
       transition: flex-basis 0.2s ease, width 0.2s ease;
 
       &.collapsed {
-        flex-basis: 34px;
-        width: 34px;
+        flex-basis: 42px;
+        width: 42px;
 
         .seriesSelectorTitle,
         .seriesSelectorContent,
@@ -207,44 +228,50 @@
           min-height: 100%;
           padding: 8px 0;
           justify-content: center;
-          writing-mode: vertical-rl;
+          border-bottom: 0;
         }
 
         .seriesSelectorCollapse {
-          position: static;
-          width: 24px;
-          height: 40px;
-          border-radius: 4px 0 0 4px;
-          line-height: 38px;
-          writing-mode: horizontal-tb;
+          position: absolute;
+          top: 50%;
+          right: auto;
+          left: 0;
+          width: 28px;
+          height: 36px;
+          border-left: 0;
+          border-right: 1px solid #2a90b8;
+          border-radius: 0 4px 4px 0;
+          line-height: 34px;
+          transform: translateY(-50%);
         }
       }
 
       .seriesSelectorToolbar {
         min-height: 54px;
-        padding: 8px 28px 8px 10px;
+        padding: 8px 12px;
         box-sizing: border-box;
         display: flex;
         align-items: center;
         gap: 10px;
-        position: relative;
+        position: static;
         border-bottom: 1px solid #1f1f1f;
       }
 
       .seriesSelectorCollapse {
-        width: 20px;
-        height: 40px;
+        width: 28px;
+        height: 36px;
         padding: 0;
         position: absolute;
         right: 0;
-        top: 7px;
+        top: 50%;
         border: 1px solid #2a90b8;
         border-right: 0;
         border-radius: 4px 0 0 4px;
         background-color: #102b36;
         color: #d8edf7;
         font-size: 18px;
-        line-height: 38px;
+        line-height: 34px;
+        transform: translateY(-50%);
         cursor: pointer;
       }
 
@@ -257,7 +284,7 @@
         flex: 1 1 auto;
         min-height: 0;
         overflow: auto;
-        padding: 10px;
+        padding: 10px 14px 10px 10px;
         box-sizing: border-box;
       }
 
@@ -774,7 +801,7 @@
         width: 100%;
         min-height: 42px;
         display: grid;
-        grid-template-columns: 46px 54px 44px 44px 66px 72px 68px minmax(90px, 1fr) 112px;
+        grid-template-columns: 54px 44px 44px 66px 72px 68px minmax(90px, 1fr) 112px;
         align-items: stretch;
         border-bottom: 1px solid #242424;
         font-size: 12px;
@@ -804,16 +831,17 @@
         }
       }
 
-      .editableLesionCheckboxCell {
+      .editableLesionColorCell {
         justify-content: center;
+      }
 
-        input {
-          width: 14px;
-          height: 14px;
-          margin: 0;
-          accent-color: #2a90b8;
-          cursor: pointer;
-        }
+      .editableLesionColorSwatch {
+        width: 18px;
+        height: 18px;
+        box-sizing: border-box;
+        border: 1px solid rgba(255, 255, 255, 0.32);
+        border-radius: 3px;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
       }
 
       .editableLesionHead {

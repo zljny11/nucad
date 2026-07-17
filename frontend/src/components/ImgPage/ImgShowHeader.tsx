@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from "react";
+import React, { useState, useContext, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import PubSub from "pubsub-js";
 import { getRenderingEngine } from "@cornerstonejs/core";
@@ -150,6 +150,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
   const [crosshairsActive, setCrosshairsActive] = useState(false);
   const [maskState, setMaskState] = useState<MaskToolbarState>(initialMaskState);
   const [brushMenuOpen, setBrushMenuOpen] = useState(false);
+  const editorCrosshairsInitialized = useRef(false);
 
   useEffect(() => {
     const token = PubSub.subscribe(MASK_STATE_TOPIC, (_, data) => {
@@ -174,6 +175,44 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     VolumeToolGroup.setToolDisabled(CrosshairsTool.toolName);
     setCrosshairsActive(false);
   };
+
+  const setCrosshairsPassive = () => {
+    VolumeToolGroup.setToolPassive(CrosshairsTool.toolName);
+    setCrosshairsActive(true);
+  };
+
+  const enableCrosshairs = useCallback(() => {
+    if (!volumeLoaded.current) {
+      return;
+    }
+
+    if (voiSync) {
+      removeVoiSynchronizers();
+      setVoiSync(false);
+    }
+
+    setProbeCursorHidden(false);
+    setToolPassiveFun(VolumeToolGroup);
+    PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
+    VolumeToolGroup.setToolActive(CrosshairsTool.toolName, {
+      bindings: [
+        {
+          mouseButton: MouseBindings.Primary,
+        },
+      ],
+    });
+    setCurTool(CrosshairsTool.toolName);
+    setCrosshairsActive(true);
+  }, [voiSync, volumeLoaded]);
+
+  useEffect(() => {
+    if (!isEditor || !maskState.ready || editorCrosshairsInitialized.current) {
+      return;
+    }
+
+    enableCrosshairs();
+    editorCrosshairsInitialized.current = true;
+  }, [enableCrosshairs, isEditor, maskState.ready]);
 
   const goBackListPage = () => {
     if (volumeLoaded.current) {
@@ -267,15 +306,22 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
     if (maskState.mode === mode && !forceActive) {
       PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
-      setCurTool("");
+      if (crosshairsActive) {
+        enableCrosshairs();
+      } else {
+        setToolPassiveFun(VolumeToolGroup);
+        setCurTool("");
+      }
       return;
     }
 
     if (voiSync) {
       setVoiSyncFun();
     }
-    disableCrosshairs();
     setToolPassiveFun(VolumeToolGroup);
+    if (crosshairsActive) {
+      setCrosshairsPassive();
+    }
     setProbeCursorHidden(false);
     PubSub.publishSync(MASK_SET_MODE_TOPIC, mode);
     setCurTool(BrushTool.toolName);
@@ -283,6 +329,12 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
 
   const showBrushMenu = () => {
     if (!maskState.ready) {
+      return;
+    }
+
+    if (maskState.mode === "brush") {
+      setMaskMode("brush");
+      setBrushMenuOpen(false);
       return;
     }
 
@@ -336,25 +388,16 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
     }
     if (crosshairsActive) {
       disableCrosshairs();
-      setCurTool("");
+      setCurTool(maskState.mode === "none" ? "" : BrushTool.toolName);
     } else {
-      if (voiSync) {
-        removeVoiSynchronizers();
-        setVoiSync(false);
+      if (maskState.mode !== "none") {
+        setCrosshairsPassive();
+        setCurTool(BrushTool.toolName);
+        return;
       }
-      setProbeCursorHidden(false);
-      setToolPassiveFun(VolumeToolGroup);
-      PubSub.publishSync(MASK_SET_MODE_TOPIC, "none");
-      VolumeToolGroup.setToolActive(CrosshairsTool.toolName, {
-        bindings: [
-          {
-            mouseButton: MouseBindings.Primary,
-          },
-        ],
-      });
-      setCurTool(CrosshairsTool.toolName);
+
+      enableCrosshairs();
     }
-    setCrosshairsActive(!crosshairsActive);
   };
 
   const resetImage = () => {
@@ -648,9 +691,9 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
               onClick={() => maskState.ready && PubSub.publish(MASK_EXPORT_TOPIC)}
             >
               <div className="NewIconfont">
-                &#xe8a4;
+                &#xe613;
               </div>
-              <div>导出Mask</div>
+              <div>导出结果</div>
             </div>
           </>
         ) : null}
@@ -663,7 +706,10 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       </div>
 
       {isEditor ? (
-        <div className="maskRadiusFloating">半径: {maskState.brushSize}</div>
+        <>
+          <div className="maskStatusFloating">{maskState.message}</div>
+          <div className="maskRadiusFloating">半径: {maskState.brushSize}</div>
+        </>
       ) : null}
     </div>
   );

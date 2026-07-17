@@ -27,7 +27,7 @@ export interface SelectedSeries {
 
 interface SeriesSelectorPanelProps {
   selectedSeriesId: string;
-  onSeriesChange: (series: SelectedSeries) => void;
+  onSeriesChange: (series: SelectedSeries | null) => void;
 }
 
 const getBaseName = (filePath: string) =>
@@ -257,6 +257,11 @@ const SeriesSelectorPanel: React.FC<SeriesSelectorPanelProps> = (props) => {
   const selectedSeries = seriesOptions.find((series) => series.id === selectedId);
 
   const selectSeries = (series: SeriesOption) => {
+    if (series.id === defaultSelectedId) {
+      onSeriesChange(null);
+      return;
+    }
+
     onSeriesChange(series);
   };
 
@@ -292,10 +297,7 @@ const SeriesSelectorPanel: React.FC<SeriesSelectorPanelProps> = (props) => {
               }
               onClick={() => selectSeries(series)}
             >
-              <span className="seriesOptionName">
-                {series.label}
-                {series.active ? <em>当前</em> : null}
-              </span>
+              <span className="seriesOptionName">{series.label}</span>
               <span className="seriesOptionMeta">
                 PET {series.petCount || "-"} / CT {series.ctCount || "-"}
               </span>

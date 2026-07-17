@@ -29,6 +29,7 @@ const { getSynchronizer } = SynchronizerManager;
 const ZOOM_SENSITIVITY = 0.65;
 const SQUARE_BRUSH_FILL_STRATEGY = "FILL_INSIDE_SQUARE";
 const SQUARE_BRUSH_ERASE_STRATEGY = "ERASE_INSIDE_SQUARE";
+const crosshairReferenceViewportIds = viewportIds.slice(0, 3);
 
 class NuCadZoomTool extends ZoomTool {
   static toolName = "NuCadZoom";
@@ -219,6 +220,16 @@ class NuCadCrosshairsTool extends CrosshairsTool {
     super(...args);
     const originalMouseMoveCallback = this.mouseMoveCallback?.bind(this);
     const originalComputeToolCenter = this.computeToolCenter?.bind(this);
+    const originalRenderAnnotation = this.renderAnnotation?.bind(this);
+    const originalAddNewAnnotation = this.addNewAnnotation?.bind(this);
+    const originalGetAnnotationsForDifferentCameras =
+      this._getAnnotationsForViewportsWithDifferentCameras?.bind(this);
+    const originalFilterAnnotationsByUniqueOrientations =
+      this._filterAnnotationsByUniqueViewportOrientations?.bind(this);
+    const filterCrosshairAnnotations = (annotations: any[] = []) =>
+      annotations.filter((annotation) =>
+        crosshairReferenceViewportIds.includes(annotation?.data?.viewportId)
+      );
 
     this.mouseMoveCallback = (evt: any, filteredToolAnnotations: any[] = []): boolean => {
       if (!originalMouseMoveCallback || !filteredToolAnnotations.length) {
@@ -233,21 +244,121 @@ class NuCadCrosshairsTool extends CrosshairsTool {
         return;
       }
 
-      originalComputeToolCenter(viewportsInfo);
+      const primaryViewportsInfo = viewportsInfo.filter((viewportInfo) =>
+        crosshairReferenceViewportIds.includes(viewportInfo.viewportId)
+      );
 
-      if (viewportsInfo.length <= 3) {
+      if (primaryViewportsInfo.length < 2) {
         return;
       }
 
-      viewportsInfo.slice(3).forEach((viewportInfo) => {
-        this.initializeViewport(viewportInfo);
-      });
-
+      originalComputeToolCenter(primaryViewportsInfo);
       const enabledElement = getEnabledElementByIds(
-        viewportsInfo[0].viewportId,
-        viewportsInfo[0].renderingEngineId
+        primaryViewportsInfo[0].viewportId,
+        primaryViewportsInfo[0].renderingEngineId
       );
       enabledElement?.renderingEngine.render();
+    };
+
+    this.addNewAnnotation = (evt: any) => {
+      if (!originalAddNewAnnotation) {
+        return null;
+      }
+
+      const element = evt?.detail?.element;
+      const enabledElement = element ? getEnabledElement(element) : null;
+
+      if (enabledElement) {
+        const currentViewportId = enabledElement.viewport?.id;
+        const currentRenderingEngineId = enabledElement.renderingEngine?.id;
+        const annotations = this._getAnnotations(enabledElement);
+        const filteredAnnotations =
+          this.filterInteractableAnnotationsForElement(
+            enabledElement.viewport.element,
+            annotations
+          );
+
+        if (!filteredAnnotations.length && currentViewportId && currentRenderingEngineId) {
+          this.initializeViewport({
+            viewportId: currentViewportId,
+            renderingEngineId: currentRenderingEngineId,
+          });
+        }
+      }
+
+      return originalAddNewAnnotation(evt);
+    };
+
+    this._getAnnotationsForViewportsWithDifferentCameras = (
+      enabledElement: any,
+      annotations: any[] = []
+    ) => {
+      if (!originalGetAnnotationsForDifferentCameras) {
+        return [];
+      }
+
+      return originalGetAnnotationsForDifferentCameras(
+        enabledElement,
+        filterCrosshairAnnotations(annotations)
+      );
+    };
+
+    this._filterAnnotationsByUniqueViewportOrientations = (
+      enabledElement: any,
+      annotations: any[] = []
+    ) => {
+      if (!originalFilterAnnotationsByUniqueOrientations) {
+        return [];
+      }
+
+      return originalFilterAnnotationsByUniqueOrientations(
+        enabledElement,
+        filterCrosshairAnnotations(annotations)
+      );
+    };
+
+    this.renderAnnotation = (enabledElement: any, svgDrawingHelper: any) => {
+      if (!originalRenderAnnotation) {
+        return false;
+      }
+
+      const renderStatus = originalRenderAnnotation(
+        enabledElement,
+        svgDrawingHelper
+      );
+      const annotations = this._getAnnotations(enabledElement);
+      const filteredToolAnnotations =
+        this.filterInteractableAnnotationsForElement(
+          enabledElement.viewport.element,
+          annotations
+        );
+      const viewportAnnotation = filteredToolAnnotations[0];
+
+      if (!viewportAnnotation?.annotationUID) {
+        return renderStatus;
+      }
+
+      const annotationUID = viewportAnnotation.annotationUID;
+      const crosshairCenterCanvas =
+        enabledElement.viewport.worldToCanvas(this.toolCenter);
+      const centerColor =
+        this.configuration.getReferenceLineColor?.(enabledElement.viewport.id) ||
+        "rgb(200, 200, 200)";
+
+      (cornerstoneTools as any).drawing.drawCircle(
+        svgDrawingHelper,
+        annotationUID,
+        "crosshair-center-point",
+        crosshairCenterCanvas,
+        4,
+        {
+          color: centerColor,
+          fill: centerColor,
+          lineWidth: 1.5,
+        }
+      );
+
+      return renderStatus;
     };
   }
 }
@@ -433,24 +544,9 @@ const viewportColors = {
   [viewportIds[2]]: "rgb(0, 200, 0)",
   [viewportIds[3]]: "rgb(200, 0, 0)",
 };
-const viewportReferenceLineControllable = [
-  viewportIds[0],
-  viewportIds[1],
-  viewportIds[2],
-  viewportIds[3],
-];
-const viewportReferenceLineDraggableRotatable = [
-  viewportIds[0],
-  viewportIds[1],
-  viewportIds[2],
-  viewportIds[3],
-];
-const viewportReferenceLineSlabThicknessControlsOn = [
-  viewportIds[0],
-  viewportIds[1],
-  viewportIds[2],
-  viewportIds[3],
-];
+const viewportReferenceLineControllable = [...crosshairReferenceViewportIds];
+const viewportReferenceLineDraggableRotatable = [...crosshairReferenceViewportIds];
+const viewportReferenceLineSlabThicknessControlsOn = [...crosshairReferenceViewportIds];
 function getReferenceLineColor(viewportId: string) {
   return viewportColors[viewportId];
 }

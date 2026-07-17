@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useRef } from "react";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { updateSheets } from "../../redux/patientSlice";
 import PubSub from "pubsub-js";
@@ -6,12 +6,8 @@ import ImgPageContext from "./functions/ImgPageContext";
 import { Checkbox } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import translateFocalAreas from "../../functions/translateFocalAreas";
-import { safeWindowRequire } from "../../utils/electron";
-
-const fs = safeWindowRequire ? safeWindowRequire("fs") : null;
-const path = safeWindowRequire ? safeWindowRequire("path") : null;
-const sep = path ? path.sep : "/"; // sep为分隔符 /或\\ ，它会根据系统自动改变，如此来实现兼容不同系统设备
-const xlsx = safeWindowRequire ? safeWindowRequire("node-xlsx") : null;
+import { getEffectiveOutputPath } from "./functions/pathUtils";
+import { loadCachedLesionSheet } from "./functions/lesionReportCache";
 
 const CheckboxGroup = Checkbox.Group;
 
@@ -23,11 +19,10 @@ const getAreaText = (area: string) => {
 const LesionTable: React.FC = () => {
   const dispatch = useAppDispatch();
   const patientInfo = useAppSelector((state) => state.patient.patientInfo);
-  const { outputPath } = patientInfo;
+  const { outputPath, inputPath } = patientInfo;
   const sheets = useAppSelector((state) => state.patient.sheets);
-  const checkboxGroupOptions = sheets[0].data.map((item: string[]) => {
-    return item[1];
-  });
+  const lesionRows = [...sheets[0].data, ...(sheets[0].doctorData || [])];
+  const checkboxGroupOptions = lesionRows.map((item: string[]) => item[1]);
   const { selectedLesions } = useContext(ImgPageContext);
   const [lesion, setLesion] = useState(-1);
   const [checkedList, setCheckedList] = useState<string[]>(selectedLesions.current);
@@ -39,44 +34,42 @@ const LesionTable: React.FC = () => {
     selectedLesions.current.length === checkboxGroupOptions.length &&
       checkboxGroupOptions.length !== 0
   );
+  const effectiveOutputPath = getEffectiveOutputPath(outputPath, inputPath);
+  const loadedOutputPath = useRef("");
 
-  const csvPath = outputPath + sep + "out" + sep + "report.xlsx";
-  // 获取病灶列表
   useEffect(() => {
-    if (!fs || !xlsx) {
+    if (!effectiveOutputPath || loadedOutputPath.current === effectiveOutputPath) {
       return;
     }
-    fs.open(csvPath, "r", (err: string) => {
-      if (err) {
-        console.log(err);
-        return;
-      }
-      const tempSheets = xlsx.parse(csvPath);
-      tempSheets[0].data.shift(); // 去除数组中没用的信息（第一个）
-      dispatch(updateSheets(tempSheets));
-    });
-  }, [csvPath, dispatch]);
 
-  const jumpFun = (imgIndexs_str: string, index: number) => {
-    const imgIndexs = imgIndexs_str.match(/\d+(\.\d+)?/g).map((imgIndex) => {
+    loadedOutputPath.current = effectiveOutputPath;
+    dispatch(updateSheets({ 0: loadCachedLesionSheet(effectiveOutputPath) }));
+  }, [dispatch, effectiveOutputPath]);
+
+  const jumpFun = (imgIndexsStr: string, index: number) => {
+    const imgIndexs = imgIndexsStr.match(/\d+(\.\d+)?/g)?.map((imgIndex) => {
       return Math.round(parseFloat(imgIndex));
     });
+
+    if (!imgIndexs?.length) {
+      return;
+    }
+
     PubSub.publish("imgJumpByIndex", imgIndexs);
     setLesion(index);
   };
 
-  const CheckboxGroupOnChange = (list: string[]) => {
+  const checkboxGroupOnChange = (list: string[]) => {
     setCheckedList(list);
     selectedLesions.current = list;
-    setIndeterminate(
-      !!list.length && list.length < checkboxGroupOptions.length
-    );
+    setIndeterminate(!!list.length && list.length < checkboxGroupOptions.length);
     setCheckAll(list.length === checkboxGroupOptions.length);
   };
 
   const onCheckAllChange = (e: CheckboxChangeEvent) => {
-    setCheckedList(e.target.checked ? checkboxGroupOptions : []);
-    selectedLesions.current = e.target.checked ? checkboxGroupOptions : [];
+    const nextCheckedList = e.target.checked ? checkboxGroupOptions : [];
+    setCheckedList(nextCheckedList);
+    selectedLesions.current = nextCheckedList;
     setIndeterminate(false);
     setCheckAll(e.target.checked);
   };
@@ -109,21 +102,25 @@ const LesionTable: React.FC = () => {
         className="CheckboxGroup"
         options={checkboxGroupOptions}
         value={checkedList}
-        onChange={CheckboxGroupOnChange}
+        onChange={checkboxGroupOnChange}
       />
-      {sheets[0].data.map((data: string[], index: number) => {
+      {lesionRows.map((data: string[], index: number) => {
+        const volume = Number.parseFloat(data[5] || "0");
+        const suvMax = Number.parseFloat(data[6] || "0");
+        const suvMean = Number.parseFloat(data[7] || "0");
+
         return (
           <div
             className="tableRow lesionItem"
             style={{ backgroundColor: lesion === index ? "#666" : "" }}
-            key={data[0]}
+            key={`${data[0]}-${index}`}
             onClick={() => jumpFun(data[2], index)}
           >
             <span>{index + 1}</span>
-            <span>{parseFloat(data[5]).toFixed(2)}ml</span>
-            <span>{parseFloat(data[6]).toFixed(2)}</span>
-            <span>{parseFloat(data[7]).toFixed(2)}</span>
-            <span>{getAreaText(data[15])}</span>
+            <span>{Number.isFinite(volume) ? volume.toFixed(2) : "-"}ml</span>
+            <span>{Number.isFinite(suvMax) ? suvMax.toFixed(2) : "-"}</span>
+            <span>{Number.isFinite(suvMean) ? suvMean.toFixed(2) : "-"}</span>
+            <span>{getAreaText(data[14] || "")}</span>
           </div>
         );
       })}

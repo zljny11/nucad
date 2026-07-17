@@ -11,6 +11,7 @@ import ImgShowHeader from "./ImgShowHeader";
 import ImgShow from "./ImgShow";
 import Report from "./Report";
 import EditableLesionPanel from "./EditableLesionPanel";
+import LesionResultSync from "./LesionResultSync";
 import {
   LESION_EDIT_CLOSE_TOPIC,
   LESION_EDIT_TOGGLE_TOPIC,
@@ -69,6 +70,7 @@ const LesionEditPage: React.FC = () => {
           {lesionEditPanelVisible ? <EditableLesionPanel /> : null}
         </div>
         <Report />
+        <LesionResultSync />
       </ImgPageContext.Provider>
     </div>
   );

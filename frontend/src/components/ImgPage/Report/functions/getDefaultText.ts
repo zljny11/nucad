@@ -35,7 +35,7 @@ const getDefaultText2 = (selectedSheetsData: string[][]): string => {
 
   selectedSheetsData.forEach((sheetsData: string[]) => {
     if (sheetsData) {
-      const organ = sheetsData[15];
+      const organ = sheetsData[14];
       const organName = translateFocalAreas(organ);
       if (organName !== "未识别") {
         text[organ] = `${organName}摄取增高，SUVmax ${parseFloat(

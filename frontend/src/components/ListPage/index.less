@@ -3,9 +3,11 @@
   background-color: #000;
   color: #fff;
   position: relative;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Heiti SC",
+    "Source Han Sans SC", sans-serif;
 
   .ListPageHeader {
-    height: 100px;
+    height: 120px;
 
     .logo {
       position: absolute;
@@ -15,28 +17,33 @@
     }
 
     .searchBar {
-      height: 1rem;
-      margin-top: 40px;
-      margin-left: 400px;
+      position: absolute;
+      top: 44px;
+      left: 400px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      height: 42px;
       text-align: left;
 
       form {
-        display: inline;
+        display: inline-block;
         position: relative;
       }
 
       input {
         width: 360px;
-        height: 31px;
-        padding-left: 13px;
+        height: 42px;
+        padding-left: 16px;
         border: none;
         outline: none;
         border-radius: 40px;
         background: #c3c3c3;
         transition: 0.3s linear;
+        font-size: 16px;
       }
       input:focus {
-        width: 400px;
+        width: 410px;
       }
       input:hover {
         background-color: #ddd;
@@ -44,30 +51,58 @@
 
       .searchBtn {
         position: absolute;
-        top: -5px;
-        right: 5px;
+        top: 1px;
+        right: 14px;
+        font-size: 18px;
       }
     }
 
     .backButton {
       position: absolute;
-      height: 72px;
-      right: 150px;
-      top: 40px;
+      top: 44px;
+      right: 32px;
+      min-width: 108px;
+      height: 42px;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 21px;
+      background: #287cb0;
+      color: #fff;
+      font-size: 24px;
+      font-family: "SimSun", "Songti SC", "STSong", serif;
+      cursor: pointer;
+
+      .NewIconfont {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      span {
+        display: inline-block;
+        line-height: 1;
+      }
     }
 
     .importButton {
-      position: absolute;
-      right: 55px;
-      top: 40px;
-      width: 72px;
-      height: 34px;
+      min-width: 108px;
+      height: 42px;
+      padding: 0 22px;
       border: none;
-      border-radius: 15px;
+      border-radius: 21px;
       background: #287cb0;
       color: #fff;
-      font-size: 15px;
+      font-size: 24px;
+      font-family: "SimSun", "Songti SC", "STSong", serif;
+      line-height: 1;
       cursor: pointer;
+      flex-shrink: 0;
     }
 
     .importButton:disabled {
@@ -77,91 +112,196 @@
 
     .importStatus {
       position: absolute;
-      right: 55px;
-      top: 76px;
-      width: 260px;
+      left: 400px;
+      top: 92px;
+      width: 520px;
       color: #c3d9e8;
       font-size: 13px;
-      text-align: right;
+      text-align: left;
       line-height: 18px;
     }
   }
 
   .bodyBox {
-    width: 1300px;
-    margin: 0 auto;
-    margin-top: 30px;
+    width: min(1380px, calc(100vw - 100px));
+    margin: 30px auto 0;
     text-align: left;
-    font-size: 16px;
+    font-size: 15px;
     font-family: "Franklin Gothic Medium", "Arial Narrow", Arial, sans-serif;
+  }
 
-    .listRow {
-      height: 60px;
-      display: flex;
-      justify-content: space-evenly;
-      line-height: 60px;
-      border-radius: 5px;
-      text-align: center;
+  .treeHeader,
+  .treeRow {
+    display: grid;
+    align-items: center;
+    border-radius: 6px;
+  }
 
-      .desc {
-        width: 250px;
-      }
-      .no,
-      .modifineTime {
-        width: 200px;
-      }
-      .name {
-        width: 150px;
-      }
-      .sex,
-      .mode {
-        width: 80px;
-      }
-      .birthday,
-      .processTime {
-        width: 100px;
-      }
-      .operation {
-        width: 120px;
-        display: flex;
-        justify-content: space-around;
-      }
+  .treeHeader {
+    grid-template-columns: 2fr 1.1fr 0.7fr 1fr 0.7fr 0.7fr;
+    min-height: 58px;
+    background-color: #131e38;
+    padding: 0 18px;
+    margin-bottom: 12px;
+  }
 
-      .DropdownContainer {
-        position: relative;
-        .dropdown {
-          height: 1.2rem;
-          display: none;
-          position: absolute;
-          top: 2.5rem;
-          left: 30px;
-          font-size: 14px;
-          line-height: 1.2rem;
-          background-color: #fff;
-          color: #202c4a;
-        }
-      }
-      .DropdownContainer:hover {
-        .dropdown {
-          display: block;
-        }
-      }
+  .treeGroup {
+    margin-bottom: 16px;
+  }
 
-      .listBtn {
-        width: 55px;
-        height: 35px;
-        margin-top: 11px;
-        background: #202c4a;
-        color: #fff;
-        font-size: 14.5px;
-        border: none;
-        border-radius: 15px;
-        cursor: pointer;
-      }
+  .treeRow {
+    width: 100%;
+    border: none;
+    color: inherit;
+    text-align: left;
+    padding: 0 18px;
+    min-height: 60px;
+  }
+
+  .patientRow {
+    grid-template-columns: 2fr 1.1fr 0.7fr 1fr 0.7fr 0.7fr;
+    background: linear-gradient(90deg, #1d3156 0%, #152340 100%);
+    cursor: pointer;
+  }
+
+  .studyBlock {
+    margin-top: 10px;
+    margin-left: 24px;
+  }
+
+  .studyRow {
+    grid-template-columns: 1.1fr 1.5fr 1.2fr 0.8fr;
+    background: #101a30;
+    border-left: 3px solid #3a6bb2;
+    cursor: pointer;
+  }
+
+  .seriesSection {
+    margin-top: 8px;
+    margin-left: 26px;
+    border-left: 1px solid #223357;
+    padding-left: 14px;
+  }
+
+  .seriesHeader,
+  .seriesRow {
+    grid-template-columns: 1.8fr 1.4fr 0.8fr 1fr 1fr;
+  }
+
+  .seriesHeader {
+    min-height: 52px;
+    background: #0f172a;
+    color: #b8c7e6;
+  }
+
+  .seriesRow {
+    min-height: 56px;
+    border-bottom: 1px solid rgba(113, 142, 189, 0.18);
+    background: rgba(16, 25, 44, 0.55);
+  }
+
+  .treeCell {
+    min-width: 0;
+    padding-right: 12px;
+  }
+
+  .patientCell,
+  .studyTitleCell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .treeArrow {
+    width: 18px;
+    color: #8eb9ff;
+    flex-shrink: 0;
+  }
+
+  .treeTitle {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .studyInfoCell,
+  .studyCountCell {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .studyLabel {
+    color: #7992bc;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .descCell,
+  .noCell {
+    word-break: break-all;
+  }
+
+  .countCell,
+  .metaCell,
+  .modeCell,
+  .studyCell,
+  .operationCell,
+  .studyCountCell {
+    text-align: center;
+  }
+
+  .operationCell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .DropdownContainer {
+    position: relative;
+
+    .dropdown {
+      display: none;
+      position: absolute;
+      top: 44px;
+      left: 0;
+      z-index: 5;
+      max-width: 300px;
+      padding: 8px 10px;
+      line-height: 1.4;
+      font-size: 13px;
+      background-color: #fff;
+      color: #202c4a;
+      border-radius: 4px;
+      word-break: break-all;
     }
-    .listRow1 {
-      background-color: #131e38;
+  }
+
+  .DropdownContainer:hover {
+    .dropdown {
+      display: block;
     }
+  }
+
+  .listBtn {
+    width: 55px;
+    height: 35px;
+    background: #202c4a;
+    color: #fff;
+    font-size: 14px;
+    border: none;
+    border-radius: 15px;
+    cursor: pointer;
+  }
+
+  .emptyState {
+    text-align: center;
+    padding: 90px 0;
+    color: #8ca0c6;
+    background: rgba(19, 30, 56, 0.65);
+    border-radius: 8px;
   }
 
   .pagination {
@@ -170,6 +310,7 @@
     right: 0;
     margin: 0 auto;
     position: absolute;
+    text-align: center;
 
     .disabledButton,
     .pageButton {
@@ -188,7 +329,7 @@
       background-color: #666;
     }
     .pageInfo {
-      font-family: '宋体';
+      font-family: "宋体";
       font-size: 18px;
       font-weight: 700;
       margin: 10px;
