@@ -35,12 +35,32 @@ const initialState: patientState = {
   },
 };
 
+const createEmptySheets = () => ({
+  "0": {
+    data: [],
+    name: "",
+    header: [],
+    doctorData: [],
+    meta: {
+      sourceType: "none" as const,
+      sourcePath: "",
+      cachePath: "",
+      templatePath: "",
+      templateExt: "",
+      templateFileName: "",
+      templateSheetName: "",
+      importedAt: "",
+    },
+  },
+});
+
 export const patientSlice = createSlice({
   name: "patient",
   initialState,
   reducers: {
     updatePatientInfo: (state, action) => {
       state.patientInfo = action.payload;
+      state.sheets = createEmptySheets();
     },
     updateSheets: (state, action) => {
       state.sheets = action.payload;

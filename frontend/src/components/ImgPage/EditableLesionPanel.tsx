@@ -384,8 +384,14 @@ const EditableLesionPanel: React.FC = () => {
     setSelectedId(lesion.id);
     const lesionLabel = Number(lesion.lesionLabel);
     if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
-      PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
-      PubSub.publish(MASK_FOCUS_SEGMENT_TOPIC, lesionLabel);
+      PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, {
+        lesionId: lesion.id,
+        lesionLabel,
+      });
+      PubSub.publish(MASK_FOCUS_SEGMENT_TOPIC, {
+        lesionId: lesion.id,
+        lesionLabel,
+      });
     }
   };
 
@@ -465,7 +471,10 @@ const EditableLesionPanel: React.FC = () => {
                 setSelectedId(lesion.id);
                 const lesionLabel = Number(lesion.lesionLabel);
                 if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
-                  PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, lesionLabel);
+                  PubSub.publish(MASK_ACTIVE_SEGMENT_TOPIC, {
+                    lesionId: lesion.id,
+                    lesionLabel,
+                  });
                 }
               }}
             >
@@ -475,7 +484,7 @@ const EditableLesionPanel: React.FC = () => {
                 <span
                   className="editableLesionColorSwatch"
                   style={{ backgroundColor: getLesionColor(lesion.lesionLabel) }}
-                  title={`病灶标签 ${lesion.lesionLabel || "-"}`}
+                  title={`病灶ID ${lesion.id || "-"}`}
                 />
               </span>
               <input

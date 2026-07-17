@@ -22,6 +22,7 @@ const DEFAULT_LESION_HEADER = [
   "CT Std",
   "所在区域",
   "调试信息",
+  "Homogeneity",
 ];
 
 interface LesionMaskStat {
@@ -33,6 +34,7 @@ interface LesionMaskStat {
   suvMax?: string;
   suvMean?: string;
   suvStd?: string;
+  homogeneity?: string;
   ctCentroid?: string;
   ctMin?: string;
   ctMax?: string;
@@ -221,6 +223,7 @@ const normalizeImportedRows = (rows: any[]) => {
           getCellByHeader(row, headerIndex, ["所在区域", "区域", "部位"], 14)
         ),
         normalizeTextValue(getCellByHeader(row, headerIndex, ["调试信息", "debugInfo"], 15)),
+        normalizeTextValue(getCellByHeader(row, headerIndex, ["Homogeneity", "homogeneity"], 16)),
       ];
     }
 
@@ -241,6 +244,7 @@ const normalizeImportedRows = (rows: any[]) => {
       normalizeTextValue(row.ctStd || row.CTStd || row.ct_std || ""),
       normalizeTextValue(row.area || row.location || row.part || ""),
       normalizeTextValue(row.debugInfo || row.debug || ""),
+      normalizeTextValue(row.homogeneity || row.Homogeneity || ""),
     ];
   });
 };
@@ -316,6 +320,13 @@ const fillManagedFields = (row: any[], headerIndex: Record<string, number>, lesi
   setManagedCell(
     row,
     headerIndex,
+    ["Homogeneity", "homogeneity"],
+    16,
+    normalizeTextValue(lesionRow[16])
+  );
+  setManagedCell(
+    row,
+    headerIndex,
     ["CT Centroid", "ctCentroid"],
     9,
     normalizeTextValue(lesionRow[9])
@@ -370,6 +381,7 @@ const applyStatToRow = (row: string[], stat: LesionMaskStat) => {
   nextRow[12] = stat.ctMean || "";
   nextRow[13] = stat.ctStd || "";
   nextRow[15] = stat.debugInfo || "";
+  nextRow[16] = stat.homogeneity || "";
   return nextRow;
 };
 

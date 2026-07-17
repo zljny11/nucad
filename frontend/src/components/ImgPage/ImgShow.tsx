@@ -51,7 +51,10 @@ import {
   SegmentationSavePayload,
 } from "./functions/segmentationApi";
 import { safeWindowRequire } from "../../utils/electron";
-import type { LesionMaskStat } from "./functions/lesionReportCache";
+import {
+  loadCachedLesionSheet,
+  type LesionMaskStat,
+} from "./functions/lesionReportCache";
 import type { SelectedSeries } from "./SeriesSelectorPanel";
 // import axios from "axios";
 
@@ -266,6 +269,20 @@ const getStoredInitialLesionFocus = () => {
   } catch (error) {
     return { lesionId: "", lesionLabel: NaN, imageIndexs: [] as number[] };
   }
+};
+
+const getLesionEventPayload = (payload: any) => {
+  if (payload && typeof payload === "object") {
+    return {
+      lesionId: payload.lesionId ? String(payload.lesionId) : "",
+      lesionLabel: Number(payload.lesionLabel ?? payload.segmentIndex),
+    };
+  }
+
+  return {
+    lesionId: "",
+    lesionLabel: Number(payload),
+  };
 };
 
 const getViewportOrThrow = (viewportId: string) => {
@@ -1204,46 +1221,54 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
     if (effectiveOutputPath) {
       try {
-        setMaskLoadingProgress(45, "Loading saved segmentation...");
-        const response = await loadSegmentation(seriesId, effectiveOutputPath);
-        setMaskLoadingProgress(62, "Preparing segmentation data...");
+        const cachedSheet = loadCachedLesionSheet(effectiveOutputPath);
+        const hasLesionRows =
+          cachedSheet.data.length || (cachedSheet.doctorData || []).length;
 
-        if (
-          response.success &&
-          response.exists &&
-          response.scalarDataBase64 &&
-          response.dimensions
-        ) {
-          const loadedMask = base64ToUint8Array(response.scalarDataBase64);
-          setMaskLoadingProgress(74, "Checking mask dimensions...");
-          const expectedLength =
-            response.dimensions[0] * response.dimensions[1] * response.dimensions[2];
+        if (!hasLesionRows) {
+          message = "未导入病灶列表，当前使用空白Mask";
+        } else {
+          setMaskLoadingProgress(45, "Loading saved segmentation...");
+          const response = await loadSegmentation(seriesId, effectiveOutputPath);
+          setMaskLoadingProgress(62, "Preparing segmentation data...");
 
           if (
-            expectedLength === scalarLength &&
-            response.dimensions[0] === referencedVolume.dimensions[0] &&
-            response.dimensions[1] === referencedVolume.dimensions[1] &&
-            response.dimensions[2] === referencedVolume.dimensions[2]
+            response.success &&
+            response.exists &&
+            response.scalarDataBase64 &&
+            response.dimensions
           ) {
-            scalarData = loadedMask;
-            source = response.source === "doctor" ? "doctor" : "algorithm";
-            if (response.isEmptyMask) {
-              message =
-                source === "doctor"
-                  ? "已加载医生确认阴性的空白Mask"
-                  : "已加载算法空白Mask";
+            const loadedMask = base64ToUint8Array(response.scalarDataBase64);
+            setMaskLoadingProgress(74, "Checking mask dimensions...");
+            const expectedLength =
+              response.dimensions[0] * response.dimensions[1] * response.dimensions[2];
+
+            if (
+              expectedLength === scalarLength &&
+              response.dimensions[0] === referencedVolume.dimensions[0] &&
+              response.dimensions[1] === referencedVolume.dimensions[1] &&
+              response.dimensions[2] === referencedVolume.dimensions[2]
+            ) {
+              scalarData = loadedMask;
+              source = response.source === "doctor" ? "doctor" : "algorithm";
+              if (response.isEmptyMask) {
+                message =
+                  source === "doctor"
+                    ? "已加载医生确认阴性的空白Mask"
+                    : "已加载算法空白Mask";
+              } else {
+                message =
+                  source === "doctor"
+                    ? "已加载医生修订版Mask"
+                    : "已加载算法初始Mask";
+              }
             } else {
-              message =
-                source === "doctor"
-                  ? "已加载医生修订版Mask"
-                  : "已加载算法初始Mask";
+              message = "Mask尺寸与当前PET/CT不一致，已回退为空白Mask";
             }
-          } else {
-            message = "Mask尺寸与当前PET/CT不一致，已回退为空白Mask";
+          } else if (!response.success) {
+            source = "error";
+            message = response.message || "Mask failed to load";
           }
-        } else if (!response.success) {
-          source = "error";
-          message = response.message || "Mask failed to load";
         }
       } catch (error) {
         source = "error";
@@ -1744,6 +1769,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
         const petVariance = stat.petCount
           ? Math.max(stat.petSumSquares / stat.petCount - petMean * petMean, 0)
           : Number.NaN;
+        const petStd = stat.petCount ? Math.sqrt(petVariance) : Number.NaN;
+        const homogeneity =
+          Number.isFinite(petMean) && petMean > 0 && Number.isFinite(petStd)
+            ? 1 / (1 + petStd / petMean)
+            : Number.NaN;
         const ctMean = stat.ctCount ? stat.ctSum / stat.ctCount : Number.NaN;
         const ctVariance = stat.ctCount
           ? Math.max(stat.ctSumSquares / stat.ctCount - ctMean * ctMean, 0)
@@ -1759,7 +1789,8 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
           volume: `${formatMaskNumber(stat.count * voxelVolumeMl, 3)}ml`,
           suvMax: stat.petCount ? formatStatisticNumber(stat.petMax) : "",
           suvMean: stat.petCount ? formatStatisticNumber(petMean) : "",
-          suvStd: stat.petCount ? formatStatisticNumber(Math.sqrt(petVariance)) : "",
+          suvStd: stat.petCount ? formatStatisticNumber(petStd) : "",
+          homogeneity: stat.petCount ? formatStatisticNumber(homogeneity) : "",
           ctCentroid: stat.ctCount ? formatStatisticNumber(ctMean) : "",
           ctMin: stat.ctCount ? formatStatisticNumber(stat.ctMin) : "",
           ctMax: stat.ctCount ? formatStatisticNumber(stat.ctMax) : "",
@@ -1986,17 +2017,19 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
     const activeSegmentToken = PubSub.subscribe(
       MASK_ACTIVE_SEGMENT_TOPIC,
-      (_, segmentIndex) => {
-        setActiveMaskSegment(Number(segmentIndex), {
-          message: `当前病灶标签 ${segmentIndex}`,
+      (_, payload) => {
+        const { lesionId, lesionLabel } = getLesionEventPayload(payload);
+        setActiveMaskSegment(lesionLabel, {
+          message: `当前病灶ID ${lesionId || lesionLabel}`,
         });
       }
     );
     const focusSegmentToken = PubSub.subscribe(
       MASK_FOCUS_SEGMENT_TOPIC,
-      (_, segmentIndex) => {
-        focusMaskSegment(Number(segmentIndex), {
-          message: `当前病灶标签 ${segmentIndex}`,
+      (_, payload) => {
+        const { lesionId, lesionLabel } = getLesionEventPayload(payload);
+        focusMaskSegment(lesionLabel, {
+          message: `当前病灶ID ${lesionId || lesionLabel}`,
         });
       }
     );
@@ -2010,7 +2043,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
 
       if (Number.isFinite(lesionLabel) && lesionLabel > 0) {
         focusMaskSegment(lesionLabel, {
-          message: `当前病灶标签 ${lesionLabel}`,
+          message: `当前病灶ID ${lesion?.id || lesionLabel}`,
           fallbackImageIndexes: imageIndexs,
         });
       } else if (imageIndexs.length) {
@@ -2043,6 +2076,11 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
     });
     const exportToken = PubSub.subscribe(MASK_EXPORT_TOPIC, () => {
       persistCurrentMask("export");
+    });
+    const stateToken = PubSub.subscribe(MASK_STATE_TOPIC, (_, data) => {
+      if (enableMaskEditing && data?.message) {
+        setMaskBanner(String(data.message));
+      }
     });
     const segmentationModifiedHandler = (event) => {
       if (
@@ -2078,6 +2116,7 @@ const ImgShow: React.FC<ImgShowProps> = (props) => {
       PubSub.unsubscribe(redoToken);
       PubSub.unsubscribe(saveToken);
       PubSub.unsubscribe(exportToken);
+      PubSub.unsubscribe(stateToken);
       brushCursorHandlers.forEach(({ element, enter, leave }) => {
         element.removeEventListener("pointerenter", enter);
         element.removeEventListener("pointerleave", leave);

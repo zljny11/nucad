@@ -17,7 +17,6 @@ import { renderingEngineId, viewportIds } from "./functions/getConstant";
 import {
   MASK_BRUSH_SHAPE_TOPIC,
   MASK_BRUSH_SIZE_TOPIC,
-  MASK_EXPORT_TOPIC,
   MASK_REDO_TOPIC,
   MASK_SAVE_TOPIC,
   MASK_SET_MODE_TOPIC,
@@ -687,13 +686,13 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
               <div>保存Mask</div>
             </div>
             <div
-              className={maskState.ready ? "buttonContainer" : "buttonContainer disabledAction"}
-              onClick={() => maskState.ready && PubSub.publish(MASK_EXPORT_TOPIC)}
+              className="buttonContainer"
+              onClick={generateReport}
             >
               <div className="NewIconfont">
-                &#xe613;
+                &#9998;
               </div>
-              <div>导出结果</div>
+              <div>查看报告</div>
             </div>
           </>
         ) : null}
@@ -706,10 +705,7 @@ const ImgShowHeader: React.FC<ImgShowHeaderProps> = (props) => {
       </div>
 
       {isEditor ? (
-        <>
-          <div className="maskStatusFloating">{maskState.message}</div>
-          <div className="maskRadiusFloating">半径: {maskState.brushSize}</div>
-        </>
+        <div className="maskRadiusFloating">半径: {maskState.brushSize}</div>
       ) : null}
     </div>
   );
